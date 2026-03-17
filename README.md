@@ -202,7 +202,7 @@ tmux attach-session -t luminesk-<server-tag>
 Planned features:
 
 * [ ] Plugin manager and DevTools-like system (similar to PMMP)
-* [x] Remote server management (yes, SSH exists, but still)
+* [ ] Remote server management (yes, SSH exists, but still)
 * [ ] Docker support
 * [ ] Automatic and manual backups
 * [ ] Cluster mode implementation
@@ -215,4 +215,4 @@ Planned features:
 
 The project is licensed under **GPL-3.0-or-later**.
 
-See [LICENSE](https://github.com/astra-v1/LumiNESK/LICENSE)
+See [LICENSE](https://github.com/astra-v1/LumiNESK/blob/main/LICENSE)
