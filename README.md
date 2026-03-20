@@ -211,6 +211,12 @@ Planned features:
 
 ---
 
+# Warning
+The project status of LumiNESK is currently **active development (Beta)**. The tool is well-suited for small private servers and plugin development; however, at this stage, it is **not recommended for large commercial projects (Production)** without prior testing. Use it at your own risk.
+
+
+---
+
 # License
 
 The project is licensed under **GPL-3.0-or-later**.
