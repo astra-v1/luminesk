@@ -1,12 +1,16 @@
-import xml.etree.ElementTree as ET
-
 import httpx
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from luminesk.core.messages import t
 from luminesk.core.registry import Maven
 from luminesk.utils.download_models import CoreDownloadInfo
 from luminesk.utils.errors import format_error
 from luminesk.utils.http import request_with_retries
+
+
+MAX_MAVEN_METADATA_BYTES = 2 * 1024 * 1024
 
 
 def get_metadata_url(core: Maven) -> str:
@@ -65,9 +69,21 @@ def _fetch_xml(client: httpx.Client, url: str) -> ET.Element:
 	except httpx.RequestError as exc:
 		raise ValueError(t("maven.fetch_xml_error", url=url, error=format_error(exc))) from exc
 
+	content_length = response.headers.get("content-length")
+	if content_length is not None:
+		try:
+			declared_size = int(content_length)
+		except ValueError:
+			declared_size = None
+		if declared_size is not None and declared_size > MAX_MAVEN_METADATA_BYTES:
+			raise ValueError(t("maven.xml_too_large", url=url))
+
+	if len(response.content) > MAX_MAVEN_METADATA_BYTES:
+		raise ValueError(t("maven.xml_too_large", url=url))
+
 	try:
-		return _strip_namespaces(ET.fromstring(response.text))
-	except ET.ParseError as exc:
+		return _strip_namespaces(ET.fromstring(response.content))
+	except (ET.ParseError, DefusedXmlException) as exc:
 		raise ValueError(t("maven.invalid_xml", url=url)) from exc
 
 

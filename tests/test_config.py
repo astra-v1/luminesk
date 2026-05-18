@@ -67,3 +67,17 @@ def test_migrate_legacy_config_creates_servers(tmp_path: Path) -> None:
 	servers = migrated["servers"]
 	assert "legacy" in servers
 	assert servers["legacy"]["jar_name"] == "core.jar"
+
+
+def test_save_writes_config_atomically(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+	config_dir = tmp_path / "config"
+	config_file = config_dir / "config.json"
+	monkeypatch.setattr(config, "CONFIG_DIR", config_dir)
+	monkeypatch.setattr(config, "CONFIG_FILE", config_file)
+
+	user_config = config.UserConfig()
+	user_config.save()
+
+	assert config_file.is_file()
+	assert not list(config_dir.glob("*.tmp"))
+	assert config.UserConfig.load().language == config.DEFAULT_LANGUAGE

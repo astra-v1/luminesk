@@ -24,16 +24,13 @@ classifiers = [
 	"Topic :: Games/Entertainment",
 ]
 dependencies = [
-	"fastapi>=0.135.1",
+	"cyclopts>=4.3.0",
+	"defusedxml>=0.7.1",
 	"httpx>=0.28.1",
-	"jinja2>=3.1.6",
 	"platformdirs>=4.9.4",
 	"pydantic>=2.12.5",
 	"rich>=14.3.3",
 	"rich-gradient>=0.3.11",
-	"textual>=8.1.1",
-	"typer>=0.24.1",
-	"uvicorn>=0.42.0",
 ]
 keywords = [
 	"minecraft",
@@ -49,7 +46,17 @@ keywords = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.0.2", "pytest-cov>=5.0.0"]
+gui = ["fastapi>=0.135.1", "jinja2>=3.1.6", "uvicorn>=0.42.0"]
+tui = ["textual>=8.1.1"]
+dev = [
+	"fastapi>=0.135.1",
+	"jinja2>=3.1.6",
+	"pytest>=9.0.3",
+	"pytest-cov>=5.0.0",
+	"textual>=8.1.1",
+	"uvicorn>=0.42.0",
+]
+build = ["nuitka>=2.8.9"]
 
 [project.urls]
 Homepage = "https://github.com/astra-v1/LumiNESK"

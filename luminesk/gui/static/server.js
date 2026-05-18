@@ -14,6 +14,8 @@
 	const consoleLogPathNode = document.getElementById("console-log-path");
 	const commandForm = document.getElementById("command-form");
 	const commandInput = document.getElementById("command-input");
+	const tokenMeta = document.querySelector("meta[name='luminesk-gui-token']");
+	const guiToken = tokenMeta ? tokenMeta.content : "";
 
 	if (!consoleNode || !consoleStatusNode || !consoleLogPathNode) {
 		return;
@@ -298,13 +300,20 @@
 		feedbackNode.textContent = message;
 	}
 
+	function authHeaders(headers = {}) {
+		return {
+			"X-LumiNESK-Token": guiToken,
+			...headers
+		};
+	}
+
 	async function runAction(action) {
 		const response = await fetch(`/api/servers/${serverTag}/${action}`,
 			{
 				method: "POST",
-				headers: {
+				headers: authHeaders({
 					"Content-Type": "application/json"
-				},
+				}),
 				body: "{}"
 			}
 		);
@@ -318,7 +327,9 @@
 	}
 
 	async function refreshConsole() {
-		const response = await fetch(`/api/servers/${serverTag}/console?lines=${logTailLimit}`);
+		const response = await fetch(`/api/servers/${serverTag}/console?lines=${logTailLimit}`, {
+			headers: authHeaders()
+		});
 		if (!response.ok) {
 			return;
 		}
@@ -345,9 +356,9 @@
 			}
 			const response = await fetch(`/api/servers/${serverTag}/command`, {
 				method: "POST",
-				headers: {
+				headers: authHeaders({
 					"Content-Type": "application/json"
-				},
+				}),
 				body: JSON.stringify({ command })
 			});
 			const payload = await response.json();

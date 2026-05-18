@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -34,11 +35,20 @@ from luminesk.core.registry import CoreProvider, registry
 from luminesk.utils.downloads import get_latest_download_info
 from luminesk.utils.download_models import CoreDownloadInfo
 from luminesk.utils.errors import format_error
-from luminesk.utils.http import stream_with_retries
+from luminesk.utils.http import request_with_retries, stream_with_retries
 from luminesk.utils.tmux import build_tmux_session_name, tmux_session_exists
 
 
 RESTART_DELAY_SECONDS = 5
+MAX_CORE_DOWNLOAD_BYTES = 512 * 1024 * 1024
+SHA256_HEX_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
+CORE_DOWNLOAD_TIMEOUT = httpx.Timeout(
+	timeout=30.0,
+	connect=10.0,
+	read=30.0,
+	write=30.0,
+	pool=10.0,
+)
 
 
 class ServerManagerError(RuntimeError):
@@ -188,23 +198,29 @@ def download_core(
 ) -> DownloadedCore:
 	target_directory.mkdir(parents=True, exist_ok=True)
 
-	with httpx.Client(timeout=None, follow_redirects=True) as client:
+	with httpx.Client(timeout=CORE_DOWNLOAD_TIMEOUT, follow_redirects=True) as client:
 		download_info = get_latest_download_info(core, client=client)
+		expected_sha256 = _fetch_download_sha256(client, download_info.url)
 		cached_core = _restore_cached_core(
 			core=core,
 			download_info=download_info,
 			target_directory=target_directory,
+			expected_sha256=expected_sha256,
 			console=console,
 		)
 		if cached_core is not None:
 			return cached_core
 
+		temp_path: Path | None = None
 		try:
 			with stream_with_retries(client, "GET", download_info.url) as response:
 				file_name = _resolve_download_file_name(response, download_info.url, core)
-				target_path = target_directory / file_name
-				temp_path = target_directory / f".{file_name}.part"
+				target_path = _resolve_download_target_path(target_directory, file_name)
+				temp_path = _get_temporary_file_path(target_path)
 				total_size = _parse_content_length(response.headers.get("content-length"))
+				_validate_download_size(total_size)
+				bytes_downloaded = 0
+				sha256 = hashlib.sha256()
 
 				progress = Progress(
 					SpinnerColumn(),
@@ -226,12 +242,27 @@ def download_core(
 						for chunk in response.iter_bytes():
 							if not chunk:
 								continue
+							bytes_downloaded += len(chunk)
+							_validate_download_size(bytes_downloaded)
+							sha256.update(chunk)
 							file.write(chunk)
 							progress.update(task_id, advance=len(chunk))
 
+				actual_sha256 = sha256.hexdigest()
+				if not hmac.compare_digest(actual_sha256, expected_sha256):
+					_cleanup_path(temp_path)
+					raise ServerManagerError(
+						"Downloaded core SHA-256 mismatch: "
+						f"expected {expected_sha256}, got {actual_sha256}."
+					)
+
 				temp_path.replace(target_path)
-				_store_core_in_cache(core, download_info, target_path)
+				_store_core_in_cache(core, download_info, target_path, expected_sha256)
 				return DownloadedCore(jar_path=target_path, version=download_info.version)
+		except ServerManagerError:
+			if temp_path is not None:
+				_cleanup_path(temp_path)
+			raise
 		except httpx.HTTPStatusError as exc:
 			raise ServerManagerError(
 				t(
@@ -322,6 +353,15 @@ def sync_runtime_states(config: UserConfig) -> bool:
 
 def get_runtime_view(config: UserConfig, server: ManagedServer) -> ServerRuntimeView:
 	sync_runtime_states(config)
+	return _build_runtime_view(config, server)
+
+
+def get_runtime_views(config: UserConfig) -> list[ServerRuntimeView]:
+	sync_runtime_states(config)
+	return [_build_runtime_view(config, server) for server in config.get_servers()]
+
+
+def _build_runtime_view(config: UserConfig, server: ManagedServer) -> ServerRuntimeView:
 	fresh_server = config.get_server_by_tag(server.tag) or server
 	is_running = fresh_server.runtime.status == "running" and _is_process_alive(fresh_server.runtime.pid)
 	loop_active = bool(fresh_server.runtime.loop_enabled and is_running)
@@ -339,11 +379,6 @@ def get_runtime_view(config: UserConfig, server: ManagedServer) -> ServerRuntime
 		last_stopped_at=fresh_server.runtime.last_stopped_at,
 		last_exit_code=fresh_server.runtime.last_exit_code,
 	)
-
-
-def get_runtime_views(config: UserConfig) -> list[ServerRuntimeView]:
-	sync_runtime_states(config)
-	return [get_runtime_view(config, server) for server in config.get_servers()]
 
 
 def send_signal_to_server(
@@ -513,7 +548,7 @@ def run_server(
 
 def format_timedelta(value: timedelta | None) -> str:
 	if value is None:
-		return "—"
+		return "-"
 
 	total_seconds = int(value.total_seconds())
 	hours, remainder = divmod(total_seconds, 3600)
@@ -675,6 +710,7 @@ def _restore_cached_core(
 	core: CoreProvider,
 	download_info: CoreDownloadInfo,
 	target_directory: Path,
+	expected_sha256: str,
 	console: Console | None = None,
 ) -> DownloadedCore | None:
 	cache_paths = _get_cached_core_paths(core, download_info)
@@ -686,7 +722,14 @@ def _restore_cached_core(
 	if file_name is None:
 		return None
 
-	target_path = target_directory / file_name
+	cached_sha256 = _read_cached_sha256(cache_paths.metadata_path)
+	if cached_sha256 is None or not hmac.compare_digest(cached_sha256, expected_sha256):
+		return None
+
+	if not _file_sha256_matches(cache_paths.jar_path, expected_sha256):
+		return None
+
+	target_path = _resolve_download_target_path(target_directory, file_name)
 
 	try:
 		_copy_cached_jar(cache_paths.jar_path, target_path)
@@ -709,6 +752,7 @@ def _store_core_in_cache(
 	core: CoreProvider,
 	download_info: CoreDownloadInfo,
 	source_path: Path,
+	sha256: str,
 ) -> None:
 	cache_paths = _get_cached_core_paths(core, download_info)
 	temp_cache_path = _get_temporary_file_path(cache_paths.jar_path)
@@ -719,7 +763,15 @@ def _store_core_in_cache(
 		shutil.copy2(source_path, temp_cache_path)
 		temp_cache_path.replace(cache_paths.jar_path)
 		temp_metadata_path.write_text(
-			json.dumps({"file_name": source_path.name}, ensure_ascii=True, indent=2),
+			json.dumps(
+				{
+					"file_name": source_path.name,
+					"sha256": sha256,
+					"source_url": download_info.url,
+				},
+				ensure_ascii=True,
+				indent=2,
+			),
 			encoding="utf-8",
 		)
 		temp_metadata_path.replace(cache_paths.metadata_path)
@@ -750,14 +802,7 @@ def _sanitize_cache_component(value: str) -> str:
 
 
 def _read_cached_file_name(metadata_path: Path) -> str | None:
-	if not metadata_path.is_file():
-		return None
-
-	try:
-		payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-	except (OSError, json.JSONDecodeError):
-		return None
-
+	payload = _read_cached_metadata(metadata_path)
 	if not isinstance(payload, dict):
 		return None
 
@@ -770,6 +815,43 @@ def _read_cached_file_name(metadata_path: Path) -> str | None:
 		return None
 
 	return normalized_file_name
+
+
+def _read_cached_sha256(metadata_path: Path) -> str | None:
+	payload = _read_cached_metadata(metadata_path)
+	if not isinstance(payload, dict):
+		return None
+
+	sha256 = payload.get("sha256")
+	if not isinstance(sha256, str):
+		return None
+
+	normalized_sha256 = sha256.strip().lower()
+	return normalized_sha256 if SHA256_HEX_RE.fullmatch(normalized_sha256) else None
+
+
+def _read_cached_metadata(metadata_path: Path) -> dict[str, object] | None:
+	if not metadata_path.is_file():
+		return None
+
+	try:
+		payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+	except (OSError, json.JSONDecodeError):
+		return None
+
+	return payload if isinstance(payload, dict) else None
+
+
+def _file_sha256_matches(path: Path, expected_sha256: str) -> bool:
+	sha256 = hashlib.sha256()
+	try:
+		with path.open("rb") as file:
+			for chunk in iter(lambda: file.read(1024 * 1024), b""):
+				sha256.update(chunk)
+	except OSError:
+		return False
+
+	return hmac.compare_digest(sha256.hexdigest(), expected_sha256)
 
 
 def _copy_cached_jar(source_path: Path, target_path: Path) -> None:
@@ -802,12 +884,12 @@ def _resolve_download_file_name(
 	if content_disposition:
 		file_name = _extract_file_name_from_content_disposition(content_disposition)
 		if file_name:
-			return file_name
+			return _require_safe_download_file_name(file_name)
 
 	response_url = str(response.url)
 	parsed_url = urlparse(response_url or download_url)
 	file_name = Path(unquote(parsed_url.path)).name
-	if file_name.endswith(".jar"):
+	if file_name.endswith(".jar") and _is_safe_download_file_name(file_name):
 		return file_name
 
 	return f"{core.id}.jar"
@@ -830,9 +912,84 @@ def _parse_content_length(raw_value: str | None) -> int | None:
 		return None
 
 	try:
-		return int(raw_value)
+		content_length = int(raw_value)
 	except ValueError:
 		return None
+
+	return content_length if content_length >= 0 else None
+
+
+def _resolve_download_target_path(target_directory: Path, file_name: str) -> Path:
+	root = target_directory.expanduser().resolve()
+	target_path = (root / _require_safe_download_file_name(file_name)).resolve()
+
+	try:
+		target_path.relative_to(root)
+	except ValueError as exc:
+		raise ServerManagerError(
+			f"Download target escapes the server directory: {target_path}"
+		) from exc
+
+	return target_path
+
+
+def _require_safe_download_file_name(file_name: str) -> str:
+	decoded_file_name = unquote(file_name).strip()
+	if not _is_safe_download_file_name(decoded_file_name):
+		raise ServerManagerError(f"Unsafe download filename: {file_name!r}")
+	return decoded_file_name
+
+
+def _is_safe_download_file_name(file_name: str) -> bool:
+	if not file_name or file_name in {".", ".."}:
+		return False
+
+	if "/" in file_name or "\\" in file_name:
+		return False
+
+	path = Path(file_name)
+	if path.is_absolute() or path.name != file_name:
+		return False
+
+	return path.suffix.lower() == ".jar"
+
+
+def _validate_download_size(size: int | None) -> None:
+	if size is None:
+		return
+
+	if size > MAX_CORE_DOWNLOAD_BYTES:
+		max_mib = MAX_CORE_DOWNLOAD_BYTES // (1024 * 1024)
+		raise ServerManagerError(f"Core download exceeds the {max_mib} MiB safety limit.")
+
+
+def _fetch_download_sha256(client: httpx.Client, download_url: str) -> str:
+	checksum_url = f"{download_url}.sha256"
+	try:
+		response = request_with_retries(
+			client,
+			"GET",
+			checksum_url,
+			raise_for_status=True,
+			retry_on_status=True,
+		)
+	except httpx.HTTPStatusError as exc:
+		raise ServerManagerError(
+			f"Missing SHA-256 checksum sidecar for core download: {checksum_url}"
+		) from exc
+	except httpx.RequestError as exc:
+		raise ServerManagerError(
+			f"Failed to fetch SHA-256 checksum from {checksum_url}: {format_error(exc)}"
+		) from exc
+
+	return _parse_sha256_checksum(response.text, checksum_url)
+
+
+def _parse_sha256_checksum(payload: str, source: str = "checksum response") -> str:
+	match = SHA256_HEX_RE.search(payload)
+	if match is None:
+		raise ServerManagerError(f"No SHA-256 checksum found in {source}.")
+	return match.group(0).lower()
 
 
 def _is_process_alive(pid: int | None) -> bool:

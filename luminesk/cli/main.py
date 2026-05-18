@@ -4,10 +4,9 @@ import signal
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Annotated
 
-import typer
-
+from cyclopts import App, Parameter
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -28,52 +27,36 @@ from luminesk.utils.rich_utils import (
 )
 
 
-app = typer.Typer(no_args_is_help=True)
+NameOption = Annotated[str | None, Parameter(name=["--name", "-n"], help=t("cli.create.option.name"))]
+DirectoryOption = Annotated[Path | None, Parameter(name=["--dir", "-d"], help=t("cli.create.option.directory"))]
+CoreOption = Annotated[str | None, Parameter(name=["--core", "-c"], help=t("cli.create.option.core"))]
+TagOption = Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.create.option.tag"))]
+ForceOption = Annotated[bool, Parameter(name=["--force", "-f"], help=t("cli.create.option.force"))]
+
+app = App(
+	name="luminesk",
+	help="Nukkit Engine Servers Kit CLI manager.",
+	version=t("cli.version.banner", version=__version__),
+	version_flags=["--version", "-v"],
+	default_parameter=Parameter(negative=""),
+)
 console = Console()
 
 
-def _supports_text(text: str) -> bool:
-	encoding = console.encoding or "utf-8"
-	try:
-		text.encode(encoding)
-	except UnicodeEncodeError:
-		return False
-	return True
+def _load_cli_config() -> UserConfig:
+	config = UserConfig.load()
+	set_language(config.language)
+	return config
 
 
 def _status_label(status: bool) -> str:
-	ok_text = t("common.ok")
-	fail_text = t("common.fail")
-	if _supports_text("✔✘"):
-		return f"[green]✔ {ok_text}[/]" if status else f"[red]✘ {fail_text}[/]"
-	return f"[green]{ok_text}[/]" if status else f"[red]{fail_text}[/]"
+	return f"[green]{t('common.ok')}[/]" if status else f"[red]{t('common.fail')}[/]"
 
 
-def version_callback(value: bool) -> None:
-	if value:
-		print(t("cli.version.banner", version=__version__))
-		raise typer.Exit()
-
-
-@app.callback()
-def main(
-	ctx: typer.Context,
-	version: bool = typer.Option(
-		None,
-		"--version",
-		"-v",
-		callback=version_callback,
-		is_eager=True,
-		help=t("cli.option.version"),
-	),
-) -> None:
-	config = UserConfig.load()
-	set_language(config.language)
-	ctx.obj = {"config": config}
-
-
-@app.command(help=t("cli.command.doctor"))
+@app.command
 def doctor() -> None:
+	"""Run system diagnostics for Nukkit-compatible cores."""
+	_load_cli_config()
 	label = AnimatedGradientText(
 		t("cli.doctor.checking_requirements"),
 		palette=(
@@ -116,30 +99,22 @@ def doctor() -> None:
 	console.print(table)
 
 	if any(res.critical and not res.status for res in results):
-		console.print(
-			error_panel(
-				t("cli.doctor.critical_error")
-			)
-		)
-		raise typer.Exit(code=1)
+		console.print(error_panel(t("cli.doctor.critical_error")))
+		raise SystemExit(1)
 
-	console.print(
-		success_panel(t("cli.doctor.success"))
-	)
+	console.print(success_panel(t("cli.doctor.success")))
 
 
-@app.command(help=t("cli.command.cores"))
+@app.command
 def cores() -> None:
+	"""List available cores."""
+	_load_cli_config()
 	lines = []
 
 	for core in registry.get_all():
-		lines.append(
-			f"[green]• {core.name}[/green]\n[dim]{core.description}[/dim]"
-		)
+		lines.append(f"[green]* {core.name}[/green]\n[dim]{core.description}[/dim]")
 
-	lines.append(
-		t("cli.cores.tip")
-	)
+	lines.append(t("cli.cores.tip"))
 
 	console.print(
 		Panel(
@@ -151,73 +126,65 @@ def cores() -> None:
 	)
 
 
-@app.command(help=t("cli.command.tui"))
+@app.command
 def tui() -> None:
+	"""Launch the LumiNESK text UI."""
+	_load_cli_config()
 	try:
 		from luminesk.tui import run_tui
 	except ModuleNotFoundError as exc:
 		if exc.name == "textual":
-			console.print(
-				error_panel(
-					t("cli.tui.textual_missing")
-				)
-			)
-			raise typer.Exit(code=1) from exc
+			console.print(error_panel(t("cli.tui.textual_missing")))
+			raise SystemExit(1) from exc
 		raise
 
 	if not dr.check_tmux().status:
 		console.print(error_panel(t("cli.tui.tmux_missing")))
-		raise typer.Exit(code=1)
+		raise SystemExit(1)
 
 	run_tui()
 
 
-@app.command(help="Run the web GUI.")
+@app.command
 def gui(
-	host: str = typer.Option("0.0.0.0", "--host", help="Bind host."),
-	port: int = typer.Option(8000, "--port", help="Bind port."),
-	reload: bool = typer.Option(False, "--reload", help="Enable auto-reload for development."),
+	*,
+	host: Annotated[str, Parameter(name="--host", help="Bind host.")] = "127.0.0.1",
+	port: Annotated[int, Parameter(name="--port", help="Bind port.")] = 8000,
+	reload: Annotated[bool, Parameter(name="--reload", help="Enable auto-reload for development.")] = False,
+	token: Annotated[str | None, Parameter(name="--token", help="GUI access token.")] = None,
 ) -> None:
+	"""Run the web GUI."""
+	_load_cli_config()
 	try:
 		from luminesk.gui import run
 	except ModuleNotFoundError as exc:
-		if exc.name in {"fastapi", "uvicorn"}:
-			console.print(
-				error_panel(
-					"GUI dependencies are missing. Install them with `uv sync`."
-				)
-			)
-			raise typer.Exit(code=1) from exc
+		if exc.name in {"fastapi", "uvicorn", "jinja2"}:
+			console.print(error_panel("GUI dependencies are missing. Install LumiNESK with the `gui` extra."))
+			raise SystemExit(1) from exc
 		raise
 
-	run(host=host, port=port, reload=reload)
+	run(host=host, port=port, reload=reload, token=token)
 
 
-@app.command(help=t("cli.command.create"))
+@app.command
 def create(
-	ctx: typer.Context,
-	name: Optional[str] = typer.Option(None, "--name", "-n", help=t("cli.create.option.name")),
-	directory: Optional[Path] = typer.Option(None, "--dir", "-d", help=t("cli.create.option.directory")),
-	core: Optional[str] = typer.Option(None, "--core", "-c", help=t("cli.create.option.core")),
-	tag: Optional[str] = typer.Option(None, "--tag", "-t", help=t("cli.create.option.tag")),
-	force: bool = typer.Option(False, "--force", "-f", help=t("cli.create.option.force")),
+	*,
+	name: NameOption = None,
+	directory: DirectoryOption = None,
+	core: CoreOption = None,
+	tag: TagOption = None,
+	force: ForceOption = False,
 ) -> None:
-	config = ctx.obj["config"]
+	"""Create a new server."""
+	config = _load_cli_config()
 
 	if core is None:
-		core = Prompt.ask(
-			t("cli.create.prompt.core"),
-			default="nukkit",
-		)
+		core = Prompt.ask(t("cli.create.prompt.core"), default="nukkit")
 
 	selected_core = registry.get_by_id(core)
 	if selected_core is None:
-		console.print(
-			error_panel(
-				t("cli.create.core_not_found", core_id=core)
-			)
-		)
-		raise typer.Exit(code=1)
+		console.print(error_panel(t("cli.create.core_not_found", core_id=core)))
+		raise SystemExit(1)
 
 	if name is None:
 		name = Prompt.ask(
@@ -226,10 +193,7 @@ def create(
 		)
 
 	if tag is None:
-		tag = Prompt.ask(
-			t("cli.create.prompt.tag"),
-			default=name.lower().replace(" ", "_"),
-		)
+		tag = Prompt.ask(t("cli.create.prompt.tag"), default=name.lower().replace(" ", "_"))
 
 	if directory is None:
 		default_directory = (config.default_server_path / tag).expanduser()
@@ -252,7 +216,7 @@ def create(
 		)
 	except (srv.ServerManagerError, ValueError) as exc:
 		console.print(error_panel(str(exc)))
-		raise typer.Exit(code=1) from exc
+		raise SystemExit(1) from exc
 
 	console.print(
 		success_panel(
@@ -271,25 +235,21 @@ def create(
 	)
 
 
-@app.command(help=t("cli.command.register"))
+@app.command
 def register(
-	ctx: typer.Context,
-	directory: Optional[Path] = typer.Option(None, "--dir", "-d", help=t("cli.register.option.directory")),
-	jar: Optional[Path] = typer.Option(None, "--jar", "-j", help=t("cli.register.option.jar")),
-	name: Optional[str] = typer.Option(None, "--name", "-n", help=t("cli.register.option.name")),
-	tag: Optional[str] = typer.Option(None, "--tag", "-t", help=t("cli.register.option.tag")),
+	*,
+	directory: DirectoryOption = None,
+	jar: Annotated[Path | None, Parameter(name=["--jar", "-j"], help=t("cli.register.option.jar"))] = None,
+	name: NameOption = None,
+	tag: TagOption = None,
 ) -> None:
-	config = ctx.obj["config"]
+	"""Register an existing server that was created manually."""
+	config = _load_cli_config()
 	server_directory = (directory or Path.cwd()).expanduser()
 
 	if jar is None:
 		default_jar = _suggest_jar_path(server_directory)
-		jar = Path(
-			Prompt.ask(
-				t("cli.register.prompt.jar"),
-				default=default_jar,
-			)
-		)
+		jar = Path(Prompt.ask(t("cli.register.prompt.jar"), default=default_jar))
 
 	if name is None:
 		name = Prompt.ask(
@@ -298,10 +258,7 @@ def register(
 		)
 
 	if tag is None:
-		tag = Prompt.ask(
-			t("cli.register.prompt.tag"),
-			default=name.lower().replace(" ", "_"),
-		)
+		tag = Prompt.ask(t("cli.register.prompt.tag"), default=name.lower().replace(" ", "_"))
 
 	try:
 		server = srv.register_existing_server(
@@ -313,7 +270,7 @@ def register(
 		)
 	except (srv.ServerManagerError, ValueError) as exc:
 		console.print(error_panel(str(exc)))
-		raise typer.Exit(code=1) from exc
+		raise SystemExit(1) from exc
 
 	console.print(
 		success_panel(
@@ -331,37 +288,39 @@ def register(
 	)
 
 
-@app.command(help=t("cli.command.start"))
+@app.command
 def start(
-	ctx: typer.Context,
-	loop: bool = typer.Option(False, "--loop", "-l", help=t("cli.start.option.loop")),
-	tag: Optional[str] = typer.Option(None, "--tag", "-t", help=t("cli.start.option.tag")),
+	*,
+	loop: Annotated[bool, Parameter(name=["--loop", "-l"], help=t("cli.start.option.loop"))] = False,
+	tag: Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.start.option.tag"))] = None,
 ) -> None:
-	config = ctx.obj["config"]
+	"""Start a server."""
+	config = _load_cli_config()
 
 	try:
 		server = srv.resolve_server(config=config, tag=tag, directory=Path.cwd())
 		exit_code = srv.run_server(config=config, server=server, loop=loop, console=console)
 	except srv.ServerManagerError as exc:
 		console.print(error_panel(str(exc)))
-		raise typer.Exit(code=1) from exc
+		raise SystemExit(1) from exc
 
-	raise typer.Exit(code=exit_code)
+	raise SystemExit(exit_code)
 
 
-@app.command(name="upgrade_core", help=t("cli.command.upgrade_core"))
+@app.command(name="upgrade_core")
 def upgrade_core(
-	ctx: typer.Context,
-	tag: Optional[str] = typer.Option(None, "--tag", "-t", help=t("cli.upgrade.option.tag")),
+	*,
+	tag: Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.upgrade.option.tag"))] = None,
 ) -> None:
-	config = ctx.obj["config"]
+	"""Upgrade the server core to the latest available version."""
+	config = _load_cli_config()
 
 	try:
 		server = srv.resolve_server(config=config, tag=tag, directory=Path.cwd())
 		updated_server = srv.upgrade_server_core(config=config, server=server, console=console)
 	except srv.ServerManagerError as exc:
 		console.print(error_panel(str(exc)))
-		raise typer.Exit(code=1) from exc
+		raise SystemExit(1) from exc
 
 	console.print(
 		success_panel(
@@ -378,26 +337,22 @@ def upgrade_core(
 	)
 
 
-@app.command(name="change_core", help=t("cli.command.change_core"))
+@app.command(name="change_core")
 def change_core(
-	ctx: typer.Context,
-	tag: Optional[str] = typer.Option(None, "--tag", "-t", help=t("cli.change.option.tag")),
-	core: Optional[str] = typer.Option(None, "--core", "-c", help=t("cli.change.option.core")),
+	*,
+	tag: Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.change.option.tag"))] = None,
+	core: Annotated[str | None, Parameter(name=["--core", "-c"], help=t("cli.change.option.core"))] = None,
 ) -> None:
-	config = ctx.obj["config"]
+	"""Change the server core."""
+	config = _load_cli_config()
 
 	if core is None:
-		core = Prompt.ask(
-			t("cli.change.prompt.core"),
-			default="nukkit",
-		)
+		core = Prompt.ask(t("cli.change.prompt.core"), default="nukkit")
 
 	selected_core = registry.get_by_id(core)
 	if selected_core is None:
-		console.print(
-			error_panel(t("cli.create.core_not_found", core_id=core))
-		)
-		raise typer.Exit(code=1)
+		console.print(error_panel(t("cli.create.core_not_found", core_id=core)))
+		raise SystemExit(1)
 
 	try:
 		server = srv.resolve_server(config=config, tag=tag, directory=Path.cwd())
@@ -409,7 +364,7 @@ def change_core(
 		)
 	except srv.ServerManagerError as exc:
 		console.print(error_panel(str(exc)))
-		raise typer.Exit(code=1) from exc
+		raise SystemExit(1) from exc
 
 	console.print(
 		success_panel(
@@ -427,33 +382,43 @@ def change_core(
 	)
 
 
-@app.command(help=t("cli.command.stop"))
+@app.command
 def stop(
-	ctx: typer.Context,
-	target: str = typer.Argument(..., help=t("cli.stop.argument.target")),
-	force: bool = typer.Option(False, "--force", "-f", help=t("cli.stop.option.force")),
+	target: Annotated[str, Parameter(help=t("cli.stop.argument.target"))],
+	/,
+	*,
+	force: Annotated[bool, Parameter(name=["--force", "-f"], help=t("cli.stop.option.force"))] = False,
 ) -> None:
-	_control_server(ctx, target=target, sig=signal.SIGTERM, force=force, action_name="stop")
+	"""Gracefully stop a server by tag or PID."""
+	_control_server(target=target, sig=signal.SIGTERM, force=force, action_name="stop")
 
 
-@app.command(help=t("cli.command.kill"))
+@app.command
 def kill(
-	ctx: typer.Context,
-	target: str = typer.Argument(..., help=t("cli.kill.argument.target")),
-	force: bool = typer.Option(False, "--force", "-f", help=t("cli.kill.option.force")),
+	target: Annotated[str, Parameter(help=t("cli.kill.argument.target"))],
+	/,
+	*,
+	force: Annotated[bool, Parameter(name=["--force", "-f"], help=t("cli.kill.option.force"))] = False,
 ) -> None:
-	_control_server(ctx, target=target, sig=signal.SIGKILL, force=force, action_name="kill")
+	"""Force-kill a server by tag or PID."""
+	_control_server(target=target, sig=signal.SIGKILL, force=force, action_name="kill")
 
 
-@app.command(name="list", help=t("cli.command.list"))
+@app.command(name="list")
 def list_servers(
-	ctx: typer.Context,
-	tag: Optional[str] = typer.Option(None, "--tag", "-t", help=t("cli.list.option.tag")),
-	status: Optional[str] = typer.Option(None, "--status", "-s", help=t("cli.list.option.status")),
-	core: Optional[str] = typer.Option(None, "--core", "-c", help=t("cli.list.option.core")),
+	*,
+	tag: Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.list.option.tag"))] = None,
+	status: Annotated[str | None, Parameter(name=["--status", "-s"], help=t("cli.list.option.status"))] = None,
+	core: Annotated[str | None, Parameter(name=["--core", "-c"], help=t("cli.list.option.core"))] = None,
 ) -> None:
-	config = ctx.obj["config"]
-	status_filter = _normalize_status_filter(status)
+	"""List servers and their status."""
+	config = _load_cli_config()
+	try:
+		status_filter = _normalize_status_filter(status)
+	except ValueError as exc:
+		console.print(error_panel(str(exc)))
+		raise SystemExit(1) from exc
+
 	views = srv.get_runtime_views(config)
 
 	filtered_views = [
@@ -489,7 +454,7 @@ def list_servers(
 			view.server.name,
 			view.server.core_id,
 			_format_status(view.status, view.loop_enabled, view.tmux_session_name),
-			str(view.pid or "—"),
+			str(view.pid or t("common.empty")),
 			srv.format_timedelta(view.uptime),
 			_format_datetime(view.last_started_at),
 			_format_datetime(view.last_stopped_at),
@@ -498,14 +463,14 @@ def list_servers(
 
 	console.print(table)
 
+
 def _control_server(
-	ctx: typer.Context,
 	target: str,
 	sig: signal.Signals,
 	force: bool,
 	action_name: str,
 ) -> None:
-	config = ctx.obj["config"]
+	config = _load_cli_config()
 
 	try:
 		result = srv.send_signal_to_server(
@@ -516,12 +481,10 @@ def _control_server(
 		)
 	except srv.ServerManagerError as exc:
 		console.print(error_panel(str(exc)))
-		raise typer.Exit(code=1) from exc
+		raise SystemExit(1) from exc
 
 	if result.loop_active and not force:
-		console.print(
-			info_panel(t("cli.control.loop_warning", tag=result.target.server.tag))
-		)
+		console.print(info_panel(t("cli.control.loop_warning", tag=result.target.server.tag)))
 
 	details = [
 		f"{t('label.action')}: [cyan]{action_name}[/cyan]",
@@ -541,7 +504,7 @@ def _normalize_status_filter(status: str | None) -> str | None:
 
 	normalized_status = status.strip().lower()
 	if normalized_status not in {"running", "stopped"}:
-		raise typer.BadParameter(t("cli.status.invalid"))
+		raise ValueError(t("cli.status.invalid"))
 	return normalized_status
 
 
@@ -554,9 +517,7 @@ def _format_status(
 	if loop_enabled:
 		suffixes.append(f"[yellow]{t('common.loop')}[/yellow]")
 	if tmux_session_name is not None:
-		suffixes.append(
-			f"[cyan]{t('common.tmux_session', session_name=tmux_session_name)}[/cyan]"
-		)
+		suffixes.append(f"[cyan]{t('common.tmux_session', session_name=tmux_session_name)}[/cyan]")
 	suffix = f" [dim]({', '.join(suffixes)})[/dim]" if suffixes else ""
 	if status == "running":
 		return f"[green]{t('common.running')}[/green]{suffix}"

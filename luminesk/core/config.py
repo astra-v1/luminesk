@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -87,8 +89,35 @@ class UserConfig(BaseModel):
 
 	def save(self) -> None:
 		CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-		with CONFIG_FILE.open("w", encoding="utf-8") as file:
-			file.write(self.model_dump_json(indent=4))
+		temp_path: Path | None = None
+		try:
+			with tempfile.NamedTemporaryFile(
+				"w",
+				encoding="utf-8",
+				dir=CONFIG_DIR,
+				prefix=f".{CONFIG_FILE.name}.",
+				suffix=".tmp",
+				delete=False,
+			) as file:
+				temp_path = Path(file.name)
+				try:
+					os.chmod(temp_path, 0o600)
+				except OSError:
+					pass
+				file.write(self.model_dump_json(indent=4))
+				file.flush()
+				os.fsync(file.fileno())
+			os.replace(temp_path, CONFIG_FILE)
+			try:
+				CONFIG_FILE.chmod(0o600)
+			except OSError:
+				pass
+		finally:
+			if temp_path is not None and temp_path.exists():
+				try:
+					temp_path.unlink()
+				except OSError:
+					pass
 
 	def register_server(self, server: ManagedServer) -> None:
 		self.servers[server.tag] = server

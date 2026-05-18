@@ -6,7 +6,7 @@ import subprocess
 
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from luminesk.core import manager as srv
@@ -14,17 +14,19 @@ from luminesk.tui.launcher import launch_server_detached
 from luminesk.utils.logs import find_latest_log_path, normalize_log_line_raw, read_log_tail
 from luminesk.utils.tmux import build_tmux_session_name, send_tmux_command, tmux_session_exists
 
+from .auth import attach_gui_auth_cookie, require_gui_auth
 from .constants import LOG_TAIL_LIMIT
 from .services import get_server_or_404, load_config
 from .views import render_server_page, render_servers_page, serialize_server_view
 
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_gui_auth)])
 
 
 @router.get("/", include_in_schema=False)
-async def root() -> RedirectResponse:
-	return RedirectResponse(url="/servers", status_code=303)
+async def root(request: Request) -> RedirectResponse:
+	response = RedirectResponse(url="/servers", status_code=303)
+	return attach_gui_auth_cookie(response, request)
 
 
 @router.get("/servers", response_class=HTMLResponse)
@@ -124,7 +126,7 @@ async def send_server_command(tag: str, request: Request) -> JSONResponse:
 
 	try:
 		payload = await request.json()
-	except json.JSONDecodeError:
+	except (json.JSONDecodeError, ValueError):
 		return _json_error("Request body must be valid JSON.", status_code=400)
 
 	command = str(payload.get("command", "")).strip() if isinstance(payload, dict) else ""

@@ -16,3 +16,5 @@ tmp/
 .pytest_cache/
 .codex/
 *.spec
+sources/
+report/

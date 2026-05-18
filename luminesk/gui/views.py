@@ -10,6 +10,7 @@ from luminesk.core import manager as srv
 from luminesk.utils.logs import find_latest_log_path, normalize_log_line_raw, read_log_tail
 from luminesk.utils.tmux import build_tmux_session_name, tmux_session_exists
 
+from .auth import attach_gui_auth_cookie
 from .constants import LOG_TAIL_LIMIT
 
 
@@ -27,10 +28,10 @@ def render_servers_page(
 	stopped = total - running
 	server_rows = [_build_server_row(view) for view in views]
 
-	return templates.TemplateResponse(
+	response = templates.TemplateResponse(
+		request,
 		"servers.html",
 		{
-			"request": request,
 			"title": "Servers",
 			"total": total,
 			"running": running,
@@ -38,6 +39,7 @@ def render_servers_page(
 			"servers": server_rows,
 		},
 	)
+	return attach_gui_auth_cookie(response, request)
 
 
 def render_server_page(
@@ -55,10 +57,10 @@ def render_server_page(
 	command_available = view.status == "running" and tmux_session_exists(session_name)
 	command_hint = _command_hint(view, command_available)
 
-	return templates.TemplateResponse(
+	response = templates.TemplateResponse(
+		request,
 		"server.html",
 		{
-			"request": request,
 			"title": server.name,
 			"server": _build_server_detail(view),
 			"command_available": command_available,
@@ -68,6 +70,7 @@ def render_server_page(
 			"log_path_display": str(log_path) if log_path is not None else "No log file yet",
 		},
 	)
+	return attach_gui_auth_cookie(response, request)
 
 
 def serialize_server_view(view: srv.ServerRuntimeView) -> dict[str, object]:
@@ -101,7 +104,7 @@ def _build_server_row(view: srv.ServerRuntimeView) -> dict[str, str]:
 		"core_version": server.core_version or "unknown",
 		"status_label": _status_text(view),
 		"status_class": _status_class(view),
-		"pid": str(view.pid or "—"),
+		"pid": str(view.pid or "-"),
 		"uptime": srv.format_timedelta(view.uptime),
 		"last_started_at": _format_datetime(view.last_started_at),
 	}
@@ -118,11 +121,11 @@ def _build_server_detail(view: srv.ServerRuntimeView) -> dict[str, str]:
 		"path": str(server.path),
 		"status_label": _status_text(view),
 		"status_class": _status_class(view),
-		"pid": str(view.pid or "—"),
+		"pid": str(view.pid or "-"),
 		"uptime": srv.format_timedelta(view.uptime),
 		"last_started_at": _format_datetime(view.last_started_at),
 		"last_stopped_at": _format_datetime(view.last_stopped_at),
-		"tmux_session_name": view.tmux_session_name or "—",
+		"tmux_session_name": view.tmux_session_name or "-",
 	}
 
 
@@ -132,7 +135,7 @@ def _status_text(view: srv.ServerRuntimeView) -> str:
 		parts.append("loop")
 	if view.tmux_session_name:
 		parts.append(view.tmux_session_name)
-	return " · ".join(parts)
+	return " / ".join(parts)
 
 
 def _status_class(view: srv.ServerRuntimeView) -> str:
@@ -141,7 +144,7 @@ def _status_class(view: srv.ServerRuntimeView) -> str:
 
 def _format_datetime(value: datetime | None) -> str:
 	if value is None:
-		return "—"
+		return "-"
 	return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 

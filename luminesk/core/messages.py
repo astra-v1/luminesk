@@ -7,7 +7,7 @@ DEFAULT_LANGUAGE = "en"
 
 MESSAGE_CATALOGS: Final[dict[str, dict[str, str]]] = {
 	"en": {
-		"common.empty": "—",
+		"common.empty": "-",
 		"common.ok": "OK",
 		"common.fail": "FAIL",
 		"common.yes": "yes",
@@ -81,6 +81,7 @@ MESSAGE_CATALOGS: Final[dict[str, dict[str, str]]] = {
 		"maven.fetch_xml_http": "Failed to fetch XML from {url}: HTTP {status_code}",
 		"maven.fetch_xml_error": "Failed to fetch XML from {url}: {error}",
 		"maven.invalid_xml": "Invalid XML at {url}",
+		"maven.xml_too_large": "Maven metadata at {url} is larger than the safety limit.",
 		"maven.versioning_missing": "Maven metadata is missing the versioning section.",
 		"maven.latest_version_missing": "Failed to determine the latest core version.",
 		"maven.snapshot_versioning_missing": "Snapshot metadata is missing the versioning section.",

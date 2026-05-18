@@ -5,10 +5,10 @@
 {% block content %}
 <section class="page-header">
 	<div>
-		<a class="secondary-link" href="/servers">← Back to servers</a>
+		<a class="secondary-link" href="/servers">&lt;- Back to servers</a>
 		<p class="eyebrow">Server</p>
 		<h1>{{ server.name }}</h1>
-		<p class="subtitle">{{ server.tag }} · {{ server.core_id }} · {{ server.path }}</p>
+		<p class="subtitle">{{ server.tag }} / {{ server.core_id }} / {{ server.path }}</p>
 	</div>
 	<div class="action-group">
 		<button class="button" data-action="start">Start</button>

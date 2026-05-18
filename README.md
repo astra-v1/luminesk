@@ -51,7 +51,7 @@ Supported engines: [Nukkit](https://github.com/CloudburstMC/Nukkit), [PowerNukki
 
 | Component | Version                        | Required |
 |----------|--------------------------------|----------|
-| Python   | **3.13+** (3.14 recommended)   | Not required if you don’t install via pip |
+| Python   | **3.13+** (3.14 recommended)   | Not required if you don't install via pip |
 | Java     | 21+                            | Required for running servers |
 | tmux     | latest                         | Optional (only for TUI/GUI usage) |
 
@@ -118,25 +118,23 @@ uv run nesk --help # short alias for luminesk
 
 ## Building a binary
 
-Uses **[PyInstaller](https://pypi.org/project/pyinstaller/)**.
+Uses **[Nuitka](https://nuitka.net/)**.
 
 Linux/macOS:
 
 ```bash
-pyinstaller --onefile --name luminesk \
-  --add-data "luminesk/gui/templates:luminesk/gui/templates" \
-  --add-data "luminesk/gui/static:luminesk/gui/static" \
-  --add-data "luminesk/tui/styles:luminesk/tui/styles" \
+nuitka --onefile --output-filename=luminesk \
+  --include-package-data=luminesk.gui \
+  --include-package-data=luminesk.tui \
   luminesk/__main__.py
 ```
 
 Windows:
 
 ```bash
-pyinstaller --onefile --name luminesk ^
-  --add-data "luminesk\\gui\\templates;luminesk\\gui\\templates" ^
-  --add-data "luminesk\\gui\\static;luminesk\\gui\\static" ^
-  --add-data "luminesk\\tui\\styles;luminesk\\tui\\styles" ^
+nuitka --onefile --output-filename=luminesk.exe ^
+  --include-package-data=luminesk.gui ^
+  --include-package-data=luminesk.tui ^
   luminesk/__main__.py
 ```
 
@@ -160,7 +158,7 @@ Create a server:
 
 ```bash
 nesk create -n "My Server" -d ./servers/my -c nukkit -t my_server
-# Parameters are optional — Wizard Setup will start if omitted
+# Parameters are optional - Wizard Setup will start if omitted
 ```
 
 Start a server:
@@ -182,6 +180,15 @@ List servers:
 ```bash
 nesk list
 ```
+
+Run the local web GUI:
+
+```bash
+nesk gui
+```
+
+The GUI binds to `127.0.0.1` by default and prints a one-time access URL containing a startup token.
+Use `--token` or `LUMINESK_GUI_TOKEN` if you want a stable token.
 
 ---
 
@@ -206,7 +213,7 @@ Planned features:
 * [ ] Docker support
 * [ ] Automatic and manual backups
 * [ ] Cluster mode implementation
-* [ ] One-line curl install script (for those who don’t want Python/pip or manual binary downloads)
+* [ ] One-line curl install script (for those who don't want Python/pip or manual binary downloads)
 * ...and maybe more
 
 ---

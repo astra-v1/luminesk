@@ -1,4 +1,5 @@
 import pytest
+import httpx
 
 from luminesk.core.registry import CoreProvider, GitHubRelease, Jenkins, Maven
 from luminesk.utils import downloads, github_releases, jenkins, maven
@@ -53,3 +54,17 @@ def test_get_availability_check_url_github(monkeypatch: pytest.MonkeyPatch) -> N
 	)
 	monkeypatch.setattr(github_releases, "get_release_api_url", lambda _: "https://api.example/releases")
 	assert downloads.get_availability_check_url(core) == "https://api.example/releases"
+
+
+def test_maven_fetch_xml_rejects_large_metadata() -> None:
+	def handler(request: httpx.Request) -> httpx.Response:
+		return httpx.Response(
+			200,
+			headers={"content-length": str(maven.MAX_MAVEN_METADATA_BYTES + 1)},
+			content=b"<metadata />",
+		)
+
+	client = httpx.Client(transport=httpx.MockTransport(handler))
+
+	with pytest.raises(ValueError, match="larger than the safety limit"):
+		maven._fetch_xml(client, "https://example.com/maven-metadata.xml")

@@ -12,15 +12,15 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
-          cache: pip
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
       - name: Install deps
-        run: pip install -e . pytest
+        run: uv sync --locked --extra dev
       - name: Run tests
-        run: pytest
+        run: uv run pytest
 
   build:
     name: Build (${{ matrix.os }})
@@ -30,12 +30,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
       - name: Install deps
-        run: pip install . pyinstaller
+        run: uv sync --locked --extra dev --extra build
       - name: Build + Test binary
         shell: bash
         run: |
@@ -51,8 +52,15 @@ jobs:
           NAME="luminesk-$OS_NAME-$ARCH"
           [[ "$RUNNER_OS" == "Windows" ]] && NAME="$NAME.exe"
 
-          echo "BINARY_NAME=$NAME" >> $GITHUB_ENV
-          pyinstaller --onefile luminesk/__main__.py --name "$NAME"
+          echo "BINARY_NAME=$NAME" >> "$GITHUB_ENV"
+          uv run python -m nuitka \
+            --onefile \
+            --assume-yes-for-downloads \
+            --output-dir=dist \
+            --output-filename="$NAME" \
+            --include-package-data=luminesk.gui \
+            --include-package-data=luminesk.tui \
+            luminesk/__main__.py
 
           BIN="dist/$NAME"
           chmod +x "$BIN" || true
@@ -62,7 +70,7 @@ jobs:
           ./"$BIN" create -n "CI-Test" -d "./test-server" -c "pnx" -t "test"
           ./"$BIN" cores
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: binaries-${{ matrix.os }}
           path: dist/${{ env.BINARY_NAME }}
@@ -75,14 +83,14 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: all_binaries
           pattern: binaries-*
           merge-multiple: true
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: all_binaries/*
           generate_release_notes: true
@@ -94,10 +102,10 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
       - name: Build Package
         run: uv build
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1

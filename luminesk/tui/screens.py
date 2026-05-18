@@ -246,7 +246,7 @@ class HomeScreen(Screen):
 					view.server.name,
 					view.server.core_id,
 					render_runtime_status(view),
-					str(view.pid or "—"),
+					str(view.pid or "-"),
 					srv.format_timedelta(view.uptime),
 					format_timestamp(view.last_started_at),
 				)

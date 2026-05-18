@@ -11,7 +11,7 @@ from luminesk.core.messages import t
 if TYPE_CHECKING:
 	from rich_gradient import ColorType
 
-type RGBColor = tuple[int, int, int]
+RGBColor = tuple[int, int, int]
 
 
 def _load_gradient():
