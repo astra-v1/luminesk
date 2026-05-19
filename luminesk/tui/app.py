@@ -19,7 +19,7 @@ from luminesk.core.messages import set_language, t
 from luminesk.core.registry import registry
 from luminesk.tui.launcher import DetachedLaunchResult, launch_server_detached
 from luminesk.utils.errors import format_error
-from luminesk.utils.logs import find_latest_log_path, read_log_tail
+from luminesk.utils.logs import find_latest_log_path, read_log_increment, read_log_tail
 from luminesk.utils.tmux import (
 	build_tmux_attach_command,
 	build_tmux_session_name,
@@ -348,9 +348,34 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 
 		log_changed = self._live_log_tag != view.server.tag or self._live_log_path != log_path
 		log_truncated = current_size < self._live_log_position
-		if not log_changed and not log_truncated and current_size == self._live_log_position:
+		if log_changed or log_truncated:
+			self._replace_console_tail(
+				log_widget=log_widget,
+				server_tag=view.server.tag,
+				log_path=log_path,
+				current_size=current_size,
+			)
 			return
 
+		if current_size == self._live_log_position:
+			return
+
+		result = read_log_increment(log_path, self._live_log_position)
+		if result.lines:
+			for line in result.lines:
+				log_widget.write(render_console_line(line), scroll_end=False)
+			log_widget.scroll_end(animate=False)
+		self._live_log_tag = view.server.tag
+		self._live_log_path = log_path
+		self._live_log_position = result.position
+
+	def _replace_console_tail(
+		self,
+		log_widget: RichLog,
+		server_tag: str,
+		log_path: Path,
+		current_size: int,
+	) -> None:
 		log_widget.clear()
 		lines = read_log_tail(log_path, limit=120)
 		if lines:
@@ -359,7 +384,7 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 			log_widget.scroll_end(animate=False)
 		else:
 			log_widget.write(t("tui.log.empty"))
-		self._live_log_tag = view.server.tag
+		self._live_log_tag = server_tag
 		self._live_log_path = log_path
 		self._live_log_position = current_size
 

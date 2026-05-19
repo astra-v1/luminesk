@@ -10,7 +10,7 @@ from luminesk.core.messages import t
 from luminesk.core.registry import GitHubRelease
 from luminesk.utils.download_models import CoreDownloadInfo
 from luminesk.utils.errors import format_error
-from luminesk.utils.http import request_with_retries
+from luminesk.utils.http import get_json_object_with_retries
 
 
 def get_release_api_url(core: GitHubRelease) -> str:
@@ -56,30 +56,15 @@ def _fetch_json(client: httpx.Client, url: str) -> dict[str, Any]:
 		"User-Agent": "luminesk",
 	}
 	try:
-		response = request_with_retries(
-			client,
-			"GET",
-			url,
-			headers=headers,
-			raise_for_status=True,
-			retry_on_status=True,
-		)
+		return get_json_object_with_retries(client, url, headers=headers)
 	except httpx.HTTPStatusError as exc:
 		raise ValueError(
 			t("github.fetch_release_http", url=url, status_code=exc.response.status_code)
 		) from exc
 	except httpx.RequestError as exc:
 		raise ValueError(t("github.fetch_release_error", url=url, error=format_error(exc))) from exc
-
-	try:
-		payload = response.json()
 	except ValueError as exc:
 		raise ValueError(t("github.invalid_json", url=url)) from exc
-
-	if not isinstance(payload, dict):
-		raise ValueError(t("github.invalid_json", url=url))
-
-	return payload
 
 
 def _select_asset_download_url(assets: list[Any], pattern: str) -> str:

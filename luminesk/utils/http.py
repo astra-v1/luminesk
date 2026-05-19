@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 import httpx
 
@@ -39,8 +39,8 @@ def request_with_retries(
 						continue
 					raise
 			elif retry_on_status and not response.is_success:
-				response.close()
 				if attempt < attempts:
+					response.close()
 					time.sleep(delay_seconds)
 					continue
 			return response
@@ -55,6 +55,26 @@ def request_with_retries(
 		raise last_exception
 
 	raise RuntimeError("Request failed without an exception.")
+
+
+def get_json_object_with_retries(
+	client: httpx.Client,
+	url: str,
+	*,
+	headers: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+	response = request_with_retries(
+		client,
+		"GET",
+		url,
+		headers=headers,
+		raise_for_status=True,
+		retry_on_status=True,
+	)
+	payload = response.json()
+	if not isinstance(payload, dict):
+		raise ValueError("JSON response is not an object.")
+	return payload
 
 
 @contextmanager

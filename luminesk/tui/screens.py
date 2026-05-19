@@ -24,6 +24,9 @@ from .formatting import (
 from .models import FormField
 
 
+LIVE_CONSOLE_MAX_LINES = 500
+
+
 class InputFormScreen(ModalScreen[dict[str, str] | None]):
 	BINDINGS = [
 		Binding("escape", "cancel", t("common.close")),
@@ -314,7 +317,13 @@ class ServerScreen(Screen):
 					with Container(classes="card fill-card", id="server-console-card"):
 						yield Static(t("label.live_console"), classes="card-title")
 						yield Static("", id="server-log-meta", classes="section-copy")
-						yield RichLog(id="server-console", auto_scroll=True, highlight=True, markup=False)
+						yield RichLog(
+							id="server-console",
+							auto_scroll=True,
+							highlight=True,
+							markup=False,
+							max_lines=LIVE_CONSOLE_MAX_LINES,
+						)
 						yield Input(
 							placeholder=t("tui.server.command_placeholder"),
 							id="server-command-input",
