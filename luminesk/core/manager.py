@@ -36,7 +36,14 @@ from luminesk.utils.downloads import get_latest_download_info
 from luminesk.utils.download_models import CoreDownloadInfo
 from luminesk.utils.errors import format_error
 from luminesk.utils.http import request_with_retries, stream_with_retries
-from luminesk.utils.tmux import build_tmux_session_name, tmux_session_exists
+from luminesk.utils.docker import (
+	docker_container_is_running,
+	get_docker_container_exit_code,
+	get_docker_container_pid,
+	remove_docker_container,
+	stop_docker_container,
+	kill_docker_container,
+)
 
 
 RESTART_DELAY_SECONDS = 5
@@ -55,13 +62,17 @@ class ServerManagerError(RuntimeError):
 	pass
 
 
+STOP_SIGNAL = int(getattr(signal, "SIGTERM", 15))
+KILL_SIGNAL = 9
+
+
 @dataclass(slots=True, frozen=True)
 class ServerRuntimeView:
 	server: ManagedServer
 	status: str
 	pid: int | None
 	loop_enabled: bool
-	tmux_session_name: str | None
+	docker_container_name: str | None
 	uptime: timedelta | None
 	last_started_at: datetime | None
 	last_stopped_at: datetime | None
@@ -83,6 +94,7 @@ class ServerSignalResult:
 	loop_active: bool
 	force: bool
 	signaled_server: bool
+	docker_container_name: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -106,6 +118,7 @@ def create_server(
 	core: CoreProvider,
 	force: bool = False,
 	console: Console | None = None,
+	memory_limit: str | None = None,
 ) -> ManagedServer:
 	normalized_directory = directory.expanduser().resolve()
 	_ensure_registration_target_available(config, tag, normalized_directory)
@@ -121,41 +134,7 @@ def create_server(
 		core_id=core.id,
 		core_version=downloaded_core.version,
 		jar_name=downloaded_core.jar_path.name,
-	)
-	config.register_server(server)
-	config.save()
-	return server
-
-
-def register_existing_server(
-	config: UserConfig,
-	name: str,
-	tag: str,
-	directory: Path,
-	jar_path: Path,
-) -> ManagedServer:
-	normalized_directory = directory.expanduser().resolve()
-	_ensure_registration_target_available(config, tag, normalized_directory)
-
-	if not normalized_directory.exists():
-		raise ServerManagerError(
-			t("manager.directory_missing", directory=normalized_directory)
-		)
-
-	if not normalized_directory.is_dir():
-		raise ServerManagerError(
-			t("manager.path_not_server_directory", directory=normalized_directory)
-		)
-
-	resolved_jar_path = _resolve_server_jar_path(normalized_directory, jar_path)
-	core_id = _detect_core_id(normalized_directory, resolved_jar_path)
-	server = ManagedServer(
-		name=name,
-		tag=tag,
-		path=normalized_directory,
-		core_id=core_id,
-		core_version=None,
-		jar_name=resolved_jar_path.name,
+		memory_limit=memory_limit,
 	)
 	config.register_server(server)
 	config.save()
@@ -328,10 +307,11 @@ def sync_runtime_states(config: UserConfig) -> bool:
 	changed = False
 
 	for server in config.get_servers():
-		server_pid_alive = _is_process_alive(server.runtime.pid)
+		server_pid_alive = _is_server_runtime_alive(server)
 		loop_active = bool(server.runtime.loop_enabled and server_pid_alive)
 
 		if server_pid_alive:
+			changed = _sync_docker_runtime_pid(server) or changed
 			continue
 
 		if loop_active:
@@ -341,8 +321,11 @@ def sync_runtime_states(config: UserConfig) -> bool:
 			server.runtime.status != "stopped"
 			or server.runtime.pid is not None
 			or server.runtime.loop_enabled
+			or server.runtime.docker_container_name is not None
 		):
-			config.mark_server_stopped(server.tag, exit_code=server.runtime.last_exit_code)
+			exit_code = _get_runtime_exit_code(server)
+			_cleanup_stopped_docker_runtime(server)
+			config.mark_server_stopped(server.tag, exit_code=exit_code)
 			changed = True
 
 	if changed:
@@ -363,21 +346,47 @@ def get_runtime_views(config: UserConfig) -> list[ServerRuntimeView]:
 
 def _build_runtime_view(config: UserConfig, server: ManagedServer) -> ServerRuntimeView:
 	fresh_server = config.get_server_by_tag(server.tag) or server
-	is_running = fresh_server.runtime.status == "running" and _is_process_alive(fresh_server.runtime.pid)
+	is_running = fresh_server.runtime.status == "running" and _is_server_runtime_alive(fresh_server)
 	loop_active = bool(fresh_server.runtime.loop_enabled and is_running)
 	uptime = _get_uptime(fresh_server) if is_running else None
-	tmux_session_name = _get_active_tmux_session_name(fresh_server) if is_running else None
+	docker_container_name = _get_active_docker_container_name(fresh_server) if is_running else None
 
 	return ServerRuntimeView(
 		server=fresh_server,
 		status="running" if is_running else "stopped",
 		pid=fresh_server.runtime.pid if is_running else None,
 		loop_enabled=loop_active,
-		tmux_session_name=tmux_session_name,
+		docker_container_name=docker_container_name,
 		uptime=uptime,
 		last_started_at=fresh_server.runtime.last_started_at,
 		last_stopped_at=fresh_server.runtime.last_stopped_at,
 		last_exit_code=fresh_server.runtime.last_exit_code,
+	)
+
+
+def stop_server(
+	config: UserConfig,
+	target: str,
+	force: bool = False,
+) -> ServerSignalResult:
+	return send_signal_to_server(
+		config=config,
+		target=target,
+		sig=STOP_SIGNAL,
+		force=force,
+	)
+
+
+def kill_server(
+	config: UserConfig,
+	target: str,
+	force: bool = False,
+) -> ServerSignalResult:
+	return send_signal_to_server(
+		config=config,
+		target=target,
+		sig=KILL_SIGNAL,
+		force=force,
 	)
 
 
@@ -389,13 +398,39 @@ def send_signal_to_server(
 ) -> ServerSignalResult:
 	resolved_target = resolve_server_target(config, target)
 	server = config.get_server_by_tag(resolved_target.server.tag) or resolved_target.server
-	server_pid_alive = _is_process_alive(server.runtime.pid)
+	server_pid_alive = _is_server_runtime_alive(server)
 	loop_active = bool(server.runtime.loop_enabled and server_pid_alive)
 
 	if not server_pid_alive and not loop_active:
 		raise ServerManagerError(t("manager.server_not_running", tag=server.tag))
 
 	signaled_server = False
+	docker_container_name = server.runtime.docker_container_name
+
+	if docker_container_name is not None:
+		try:
+			if _is_kill_signal(sig):
+				kill_docker_container(docker_container_name)
+			else:
+				stop_docker_container(docker_container_name)
+			signaled_server = True
+		except RuntimeError as exc:
+			raise ServerManagerError(str(exc)) from exc
+
+		exit_code = get_docker_container_exit_code(docker_container_name)
+		remove_docker_container(docker_container_name)
+		config.mark_server_stopped(server.tag, exit_code=exit_code)
+		config.save()
+
+		return ServerSignalResult(
+			target=resolved_target,
+			signal_name=_get_signal_name(sig),
+			server_pid=server.runtime.pid,
+			loop_active=loop_active,
+			force=force,
+			signaled_server=signaled_server,
+			docker_container_name=docker_container_name,
+		)
 
 	if force and loop_active:
 		controller_pid = _get_parent_pid(server.runtime.pid)
@@ -415,7 +450,7 @@ def send_signal_to_server(
 
 	return ServerSignalResult(
 		target=resolved_target,
-		signal_name=signal.Signals(sig).name,
+		signal_name=_get_signal_name(sig),
 		server_pid=server.runtime.pid if server_pid_alive else None,
 		loop_active=loop_active,
 		force=force,
@@ -500,6 +535,9 @@ def run_server(
 			server.tag,
 			pid=process.pid,
 			loop_enabled=loop,
+			docker_container_id=None,
+			docker_container_name=None,
+			docker_memory_limit=None,
 		)
 		config.save()
 
@@ -575,60 +613,6 @@ def _ensure_registration_target_available(
 			)
 
 
-def _resolve_server_jar_path(directory: Path, jar_path: Path) -> Path:
-	resolved_jar_path = jar_path.expanduser()
-	if not resolved_jar_path.is_absolute():
-		resolved_jar_path = (directory / resolved_jar_path).resolve()
-	else:
-		resolved_jar_path = resolved_jar_path.resolve()
-
-	try:
-		resolved_jar_path.relative_to(directory)
-	except ValueError as exc:
-		raise ServerManagerError(
-			t(
-				"manager.jar_must_be_inside_directory",
-				jar_path=resolved_jar_path,
-				directory=directory,
-			)
-		) from exc
-
-	if not resolved_jar_path.exists():
-		raise ServerManagerError(
-			t("manager.core_file_missing", jar_path=resolved_jar_path)
-		)
-
-	if not resolved_jar_path.is_file():
-		raise ServerManagerError(t("manager.path_not_file", path=resolved_jar_path))
-
-	if resolved_jar_path.suffix.lower() != ".jar":
-		raise ServerManagerError(
-			t("manager.file_not_jar", file_name=resolved_jar_path.name)
-		)
-
-	return resolved_jar_path
-
-
-def _detect_core_id(directory: Path, jar_path: Path) -> str:
-	for core in registry.get_all():
-		config_file = directory / core.config_file
-		if core.config_file != "server.properties" and config_file.exists():
-			return core.id
-
-	jar_name = jar_path.name.lower()
-
-	if "powernukkitx" in jar_name or jar_name.startswith("pnx"):
-		return "pnx"
-
-	if "nukkit-mot" in jar_name or "mot" in jar_name:
-		return "nukkit-mot"
-
-	if "nukkit" in jar_name:
-		return "nukkit"
-
-	return "custom"
-
-
 def _ensure_server_can_modify_core(
 	config: UserConfig,
 	server: ManagedServer,
@@ -666,11 +650,49 @@ def _find_server_by_pid(config: UserConfig, pid: int) -> ManagedServer | None:
 	return None
 
 
-def _get_active_tmux_session_name(server: ManagedServer) -> str | None:
-	session_name = build_tmux_session_name(server.tag)
-	if tmux_session_exists(session_name):
-		return session_name
+def _get_active_docker_container_name(server: ManagedServer) -> str | None:
+	container_name = server.runtime.docker_container_name
+	if container_name is None:
+		return None
+
+	if docker_container_is_running(container_name):
+		return container_name
 	return None
+
+
+def _is_server_runtime_alive(server: ManagedServer) -> bool:
+	container_name = server.runtime.docker_container_name
+	if container_name is not None:
+		return docker_container_is_running(container_name)
+
+	return _is_process_alive(server.runtime.pid)
+
+
+def _sync_docker_runtime_pid(server: ManagedServer) -> bool:
+	container_name = server.runtime.docker_container_name
+	if container_name is None:
+		return False
+
+	pid = get_docker_container_pid(container_name)
+	if pid is not None and pid != server.runtime.pid:
+		server.runtime.pid = pid
+		return True
+
+	return False
+
+
+def _get_runtime_exit_code(server: ManagedServer) -> int | None:
+	container_name = server.runtime.docker_container_name
+	if container_name is None:
+		return server.runtime.last_exit_code
+
+	return get_docker_container_exit_code(container_name)
+
+
+def _cleanup_stopped_docker_runtime(server: ManagedServer) -> None:
+	container_name = server.runtime.docker_container_name
+	if container_name is not None:
+		remove_docker_container(container_name)
 
 
 def _get_parent_pid(pid: int | None) -> int | None:
@@ -704,6 +726,22 @@ def _get_parent_pid(pid: int | None) -> int | None:
 		return int(result.stdout.strip())
 	except ValueError:
 		return None
+
+
+def _is_kill_signal(sig: int) -> bool:
+	return sig == KILL_SIGNAL or _get_signal_name(sig) == "SIGKILL"
+
+
+def _get_signal_name(sig: int) -> str:
+	if sig == KILL_SIGNAL:
+		return "SIGKILL"
+	if sig == STOP_SIGNAL:
+		return "SIGTERM"
+
+	try:
+		return signal.Signals(sig).name
+	except ValueError:
+		return f"signal {sig}"
 
 
 def _restore_cached_core(

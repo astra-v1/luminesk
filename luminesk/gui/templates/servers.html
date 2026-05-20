@@ -1,40 +1,46 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="page-header">
-	<div>
-		<p class="eyebrow">LumiNESK</p>
-		<h1>Server Control Panel</h1>
-		<p class="subtitle">Simple overview of registered servers, their core, state and quick access to management actions.</p>
+<header class="topbar">
+	<a class="brand" href="/servers">
+		<span class="brand-mark">L</span>
+		<span>
+			<strong>LumiNESK</strong>
+			<small>Docker control</small>
+		</span>
+	</a>
+	<a class="button secondary" href="/servers">Refresh</a>
+</header>
+
+<section class="metric-strip">
+	<div class="metric">
+		<span>Total</span>
+		<strong>{{ total }}</strong>
+	</div>
+	<div class="metric">
+		<span>Running</span>
+		<strong>{{ running }}</strong>
+	</div>
+	<div class="metric">
+		<span>Stopped</span>
+		<strong>{{ stopped }}</strong>
 	</div>
 </section>
-<section class="summary-grid">
-	<article class="summary-card">
-		<span class="summary-label">Total</span>
-		<strong>{{ total }}</strong>
-	</article>
-	<article class="summary-card">
-		<span class="summary-label">Running</span>
-		<strong>{{ running }}</strong>
-	</article>
-	<article class="summary-card">
-		<span class="summary-label">Stopped</span>
-		<strong>{{ stopped }}</strong>
-	</article>
-</section>
-<section class="panel">
-	<div class="panel-header">
+
+<section class="workspace-panel">
+	<div class="section-toolbar">
 		<h2>Servers</h2>
-		<a class="secondary-link" href="/servers">Refresh</a>
+		<span class="section-meta">{{ running }} active / {{ total }} total</span>
 	</div>
 	<div class="table-wrap">
-		<table>
+		<table class="server-table">
 			<thead>
 				<tr>
-					<th>Name</th>
 					<th>Tag</th>
+					<th>Name</th>
 					<th>Core</th>
 					<th>Status</th>
+					<th>Memory</th>
 					<th>PID</th>
 					<th>Uptime</th>
 					<th>Last Start</th>
@@ -45,11 +51,11 @@
 				{% if servers %}
 					{% for server in servers %}
 						<tr>
+							<td><code>{{ server.tag }}</code></td>
 							<td>
 								<a class="server-link" href="/servers/{{ server.tag }}">{{ server.name }}</a>
 								<div class="muted">{{ server.path_name }}</div>
 							</td>
-							<td><code>{{ server.tag }}</code></td>
 							<td>
 								<div>{{ server.core_id }}</div>
 								<div class="muted">{{ server.core_version }}</div>
@@ -57,6 +63,7 @@
 							<td>
 								<span class="badge {{ server.status_class }}">{{ server.status_label }}</span>
 							</td>
+							<td>{{ server.memory_limit }}</td>
 							<td>{{ server.pid }}</td>
 							<td>{{ server.uptime }}</td>
 							<td>{{ server.last_started_at }}</td>
@@ -65,7 +72,7 @@
 					{% endfor %}
 				{% else %}
 					<tr>
-						<td colspan="8" class="empty-state">No servers are registered yet.</td>
+						<td colspan="9" class="empty-state">No servers yet.</td>
 					</tr>
 				{% endif %}
 			</tbody>

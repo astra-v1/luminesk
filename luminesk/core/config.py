@@ -12,6 +12,7 @@ from platformdirs import user_cache_dir, user_config_dir
 from pydantic import BaseModel, Field, field_validator
 
 from luminesk.core.messages import DEFAULT_LANGUAGE, normalize_language, t
+from luminesk.utils.docker import DEFAULT_DOCKER_MEMORY_LIMIT, normalize_memory_limit
 
 
 CONFIG_DIR = Path(user_config_dir("luminesk"))
@@ -30,6 +31,9 @@ class ServerRuntime(BaseModel):
 	status: ServerStatus = "stopped"
 	pid: int | None = None
 	loop_enabled: bool = False
+	docker_container_id: str | None = None
+	docker_container_name: str | None = None
+	docker_memory_limit: str | None = None
 	last_started_at: datetime | None = None
 	last_stopped_at: datetime | None = None
 	last_exit_code: int | None = None
@@ -42,6 +46,7 @@ class ManagedServer(BaseModel):
 	core_id: str
 	core_version: str | None = None
 	jar_name: str
+	memory_limit: str = DEFAULT_DOCKER_MEMORY_LIMIT
 	created_at: datetime = Field(default_factory=utc_now)
 	runtime: ServerRuntime = Field(default_factory=ServerRuntime)
 
@@ -65,6 +70,11 @@ class ManagedServer(BaseModel):
 	@classmethod
 	def normalize_path(cls, value: Path | str) -> Path:
 		return Path(value).expanduser().resolve()
+
+	@field_validator("memory_limit", mode="before")
+	@classmethod
+	def normalize_server_memory_limit(cls, value: str | None) -> str:
+		return normalize_memory_limit(value)
 
 	@property
 	def jar_path(self) -> Path:
@@ -149,14 +159,20 @@ class UserConfig(BaseModel):
 	def mark_server_started(
 		self,
 		tag: str,
-		pid: int,
+		pid: int | None,
 		loop_enabled: bool = False,
+		docker_container_id: str | None = None,
+		docker_container_name: str | None = None,
+		docker_memory_limit: str | None = None,
 		started_at: datetime | None = None,
 	) -> ManagedServer:
 		server = self._require_server(tag)
 		server.runtime.status = "running"
 		server.runtime.pid = pid
 		server.runtime.loop_enabled = loop_enabled
+		server.runtime.docker_container_id = docker_container_id
+		server.runtime.docker_container_name = docker_container_name
+		server.runtime.docker_memory_limit = docker_memory_limit
 		server.runtime.last_started_at = started_at or utc_now()
 		server.runtime.last_exit_code = None
 		return server
@@ -173,6 +189,9 @@ class UserConfig(BaseModel):
 		server.runtime.pid = None
 		if not preserve_loop:
 			server.runtime.loop_enabled = False
+		server.runtime.docker_container_id = None
+		server.runtime.docker_container_name = None
+		server.runtime.docker_memory_limit = None
 		server.runtime.last_stopped_at = stopped_at or utc_now()
 		server.runtime.last_exit_code = exit_code
 		return server

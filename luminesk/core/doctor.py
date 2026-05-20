@@ -23,37 +23,38 @@ class DiagnosticResult(BaseModel):
 	critical: bool = False
 
 
-def check_tmux() -> DiagnosticResult:
-	tmux_bin = shutil.which("tmux")
-	if not tmux_bin:
+def check_docker() -> DiagnosticResult:
+	docker_bin = shutil.which("docker")
+	if not docker_bin:
 		return DiagnosticResult(
-			name=t("doctor.component.tmux"),
+			name=t("doctor.component.docker"),
 			status=False,
-			message=t("doctor.tmux_missing"),
+			message=t("doctor.docker_missing"),
 			critical=False,
 		)
 
 	try:
 		result = subprocess.run(
-			[tmux_bin, "-V"],
+			[docker_bin, "version", "--format", "{{.Server.Version}}"],
 			capture_output=True,
 			text=True,
 			timeout=5,
 		)
-		output = (result.stdout or result.stderr).strip() or t("doctor.tmux_detected")
+		output = (result.stdout or result.stderr).strip() or t("doctor.docker_detected")
 		return DiagnosticResult(
-			name=t("doctor.component.tmux"),
+			name=t("doctor.component.docker"),
 			status=result.returncode == 0,
 			message=output,
 			critical=False,
 		)
 	except Exception as exc:
 		return DiagnosticResult(
-			name=t("doctor.component.tmux"),
+			name=t("doctor.component.docker"),
 			status=False,
 			message=t("common.error_prefix", error=format_error(exc)),
 			critical=False,
 		)
+
 
 def check_java() -> DiagnosticResult:
 	java_bin = shutil.which("java")

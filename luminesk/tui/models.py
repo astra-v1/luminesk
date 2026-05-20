@@ -19,14 +19,7 @@ class CreateServerRequest:
 	tag: str
 	directory: Path
 	core_id: str
-
-
-@dataclass(slots=True, frozen=True)
-class RegisterServerRequest:
-	name: str
-	tag: str
-	directory: Path
-	jar_path: Path
+	memory_limit: str
 
 
 @dataclass(slots=True, frozen=True)

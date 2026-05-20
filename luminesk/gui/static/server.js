@@ -14,6 +14,7 @@
 	const consoleLogPathNode = document.getElementById("console-log-path");
 	const commandForm = document.getElementById("command-form");
 	const commandInput = document.getElementById("command-input");
+	const memoryLimitInput = document.getElementById("memory-limit-input");
 	const tokenMeta = document.querySelector("meta[name='luminesk-gui-token']");
 	const guiToken = tokenMeta ? tokenMeta.content : "";
 
@@ -308,13 +309,16 @@
 	}
 
 	async function runAction(action) {
+		const body = action === "start" && memoryLimitInput
+			? { memory_limit: memoryLimitInput.value.trim() }
+			: {};
 		const response = await fetch(`/api/servers/${serverTag}/${action}`,
 			{
 				method: "POST",
 				headers: authHeaders({
 					"Content-Type": "application/json"
 				}),
-				body: "{}"
+				body: JSON.stringify(body)
 			}
 		);
 		const payload = await response.json();

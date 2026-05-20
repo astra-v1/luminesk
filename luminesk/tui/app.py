@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import signal
 import threading
 
 from datetime import datetime
@@ -20,15 +19,17 @@ from luminesk.core.registry import registry
 from luminesk.tui.launcher import DetachedLaunchResult, launch_server_detached
 from luminesk.utils.errors import format_error
 from luminesk.utils.logs import find_latest_log_path, read_log_increment, read_log_tail
-from luminesk.utils.tmux import (
-	build_tmux_attach_command,
-	build_tmux_session_name,
-	send_tmux_command,
-	tmux_session_exists,
+from luminesk.utils.docker import (
+	DEFAULT_DOCKER_MEMORY_LIMIT,
+	build_docker_container_name,
+	build_docker_logs_command,
+	docker_container_is_running,
+	normalize_memory_limit,
+	send_docker_command,
 )
 
 from .formatting import build_doctor_summary, render_console_line
-from .models import ActivityEntry, CreateServerRequest, FormField, RegisterServerRequest
+from .models import ActivityEntry, CreateServerRequest, FormField
 from .screens import DoctorResultsScreen, HomeScreen, InputFormScreen, ServerScreen
 
 
@@ -54,7 +55,7 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 		self._refresh_interval = refresh_interval
 		self.console_refresh_interval = console_refresh_interval
 		self._launcher = launcher or launch_server_detached
-		self._session_exists = session_exists or tmux_session_exists
+		self._session_exists = session_exists or docker_container_is_running
 		self._views: list[srv.ServerRuntimeView] = []
 		self._selected_tag: str | None = None
 		self._activity_entries: list[ActivityEntry] = []
@@ -163,6 +164,7 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 				FormField("core_id", t("label.core_id"), core_id),
 				FormField("name", t("label.name"), default_name),
 				FormField("tag", t("label.tag"), default_tag),
+				FormField("memory_limit", t("label.memory_limit"), DEFAULT_DOCKER_MEMORY_LIMIT),
 				FormField(
 					"directory",
 					t("label.directory"),
@@ -171,28 +173,6 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 			],
 		)
 		self.push_screen(screen, self._handle_create_form)
-
-	def show_register_server(self) -> None:
-		if not self._ensure_not_busy():
-			return
-		if not isinstance(self.screen, HomeScreen):
-			self._set_status(t("tui.register.home_only"))
-			return
-		cwd = Path.cwd()
-		default_name = cwd.name or t("common.manual_server_name")
-		default_tag = default_name.lower().replace(" ", "_")
-		screen = InputFormScreen(
-			title=t("tui.register.title"),
-			description=t("tui.register.description"),
-			submit_label=t("common.register"),
-			fields=[
-				FormField("directory", t("label.server_directory"), str(cwd)),
-				FormField("jar_path", t("label.jar_path"), "server.jar"),
-				FormField("name", t("label.name"), default_name),
-				FormField("tag", t("label.tag"), default_tag),
-			],
-		)
-		self.push_screen(screen, self._handle_register_form)
 
 	def start_server(self) -> None:
 		if not self._ensure_server_page():
@@ -223,7 +203,7 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 			return
 		self._run_background(
 			t("tui.kill.running", tag=view.server.tag),
-			lambda: self._send_signal(view.server.tag, signal.SIGKILL, force=True),
+			lambda: self._control_server(view.server.tag, "kill", force=True),
 			lambda result: self._on_signal_complete(result, t("tui.kill.complete")),
 		)
 
@@ -264,14 +244,14 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 			return
 		attach_command = self._build_attach_command(view)
 		if attach_command is None:
-			self._set_status(t("tui.attach.unavailable_status"))
+			self._set_status(t("tui.attach.docker_unavailable_status"))
 			self._push_log(
-				t("tui.attach.unavailable_log", tag=view.server.tag),
+				t("tui.attach.docker_unavailable_log", tag=view.server.tag),
 				tag=view.server.tag,
 			)
 			return
 		self._push_log(
-			t("tui.attach.exit_log", command=" ".join(attach_command)),
+			t("tui.attach.logs_exit_log", command=" ".join(attach_command)),
 			tag=view.server.tag,
 		)
 		self.exit(result=attach_command)
@@ -516,7 +496,7 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 			return
 		self._run_background(
 			t("tui.stop.running", tag=view.server.tag),
-			lambda: self._send_signal(view.server.tag, signal.SIGTERM, force=True),
+			lambda: self._control_server(view.server.tag, "stop", force=True),
 			lambda result: self._on_signal_complete(result, t("tui.stop.complete")),
 		)
 
@@ -547,19 +527,25 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 
 		mode = t("tui.launch.mode.loop") if loop else t("tui.launch.mode.single")
 		self._set_status(
-			t("tui.launch.created_status", session_name=launch_result.session_name, mode=mode)
+			t(
+				"tui.launch.docker_created_status",
+				container_name=launch_result.container_name,
+				mode=mode,
+				memory_limit=launch_result.memory_limit,
+			)
 		)
 		self._push_log(
 			t(
-				"tui.launch.created_log",
+				"tui.launch.docker_created_log",
 				tag=view.server.tag,
-				session_name=launch_result.session_name,
+				container_name=launch_result.container_name,
 				mode=mode,
+				memory_limit=launch_result.memory_limit,
 			),
 			tag=view.server.tag,
 		)
 		self._push_log(
-			t("tui.launch.attach_log", command=" ".join(launch_result.attach_command)),
+			t("tui.launch.logs_command_log", command=" ".join(launch_result.attach_command)),
 			tag=view.server.tag,
 		)
 		self._push_log(
@@ -578,6 +564,9 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 				tag=self._read_required_field(payload, "tag", t("label.tag")),
 				directory=Path(self._read_required_field(payload, "directory", t("label.directory"))),
 				core_id=self._read_required_field(payload, "core_id", t("label.core_id")).lower(),
+				memory_limit=normalize_memory_limit(
+					self._read_required_field(payload, "memory_limit", t("label.memory_limit"))
+				),
 			)
 		except ValueError as exc:
 			self._set_status(str(exc))
@@ -587,27 +576,6 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 			t("tui.create.running", tag=request.tag),
 			lambda: self._create_server(request),
 			self._on_create_complete,
-		)
-
-	def _handle_register_form(self, payload: dict[str, str] | None) -> None:
-		if payload is None:
-			self._set_status(t("tui.register.cancelled"))
-			return
-		try:
-			request = RegisterServerRequest(
-				name=self._read_required_field(payload, "name", t("label.name")),
-				tag=self._read_required_field(payload, "tag", t("label.tag")),
-				directory=Path(self._read_required_field(payload, "directory", t("label.directory"))),
-				jar_path=Path(self._read_required_field(payload, "jar_path", t("label.jar_path"))),
-			)
-		except ValueError as exc:
-			self._set_status(str(exc))
-			self._push_log(str(exc))
-			return
-		self._run_background(
-			t("tui.register.running", tag=request.tag),
-			lambda: self._register_server(request),
-			self._on_register_complete,
 		)
 
 	def _handle_change_core_form(
@@ -648,15 +616,7 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 			directory=request.directory,
 			core=core,
 			console=None,
-		)
-
-	def _register_server(self, request: RegisterServerRequest) -> ManagedServer:
-		return srv.register_existing_server(
-			config=self._load_config(),
-			name=request.name,
-			tag=request.tag,
-			directory=request.directory,
-			jar_path=request.jar_path,
+			memory_limit=request.memory_limit,
 		)
 
 	def _upgrade_server_core(self, tag: str) -> ManagedServer:
@@ -687,25 +647,30 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 			console=None,
 		)
 
-	def _send_signal(
+	def _control_server(
 		self,
 		tag: str,
-		sig: signal.Signals,
+		action: str,
 		force: bool,
 	) -> srv.ServerSignalResult:
-		return srv.send_signal_to_server(
+		if action == "kill":
+			return srv.kill_server(
+				config=self._load_config(),
+				target=tag,
+				force=force,
+			)
+		return srv.stop_server(
 			config=self._load_config(),
 			target=tag,
-			sig=int(sig),
 			force=force,
 		)
 
 	def _collect_diagnostics(self) -> list[dr.DiagnosticResult]:
 		self.call_from_thread(self._update_busy_message, t("tui.doctor.check_java"))
-		results = [dr.check_java(), dr.check_tmux()]
+		results = [dr.check_java(), dr.check_docker()]
 		self.call_from_thread(
 			self._update_busy_message,
-			t("tui.doctor.check_tmux_sources"),
+			t("tui.doctor.check_docker_sources"),
 		)
 		results.extend(dr.check_download_sources())
 		return results
@@ -723,22 +688,6 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 		self._push_log(
 			t(
 				"tui.create.complete_log",
-				tag=server.tag,
-				core_id=server.core_id,
-				jar_name=server.jar_name,
-				path=server.path,
-			),
-			tag=server.tag,
-		)
-		self.refresh_servers()
-
-	def _on_register_complete(self, server: ManagedServer) -> None:
-		self._set_busy(False)
-		self._selected_tag = server.tag
-		self._set_status(t("tui.register.complete_status", tag=server.tag))
-		self._push_log(
-			t(
-				"tui.register.complete_log",
 				tag=server.tag,
 				core_id=server.core_id,
 				jar_name=server.jar_name,
@@ -832,10 +781,10 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 	) -> tuple[str, ...] | None:
 		if view is None or view.status != "running":
 			return None
-		session_name = view.tmux_session_name or build_tmux_session_name(view.server.tag)
-		if not self._session_exists(session_name):
+		container_name = view.docker_container_name or build_docker_container_name(view.server.tag)
+		if not self._session_exists(container_name):
 			return None
-		return build_tmux_attach_command(session_name)
+		return build_docker_logs_command(container_name)
 
 	def submit_server_command(self, command: str) -> bool:
 		if not self._ensure_server_page():
@@ -848,14 +797,14 @@ class LumiNESKTuiApp(App[tuple[str, ...] | None]):
 				t("tui.command.server_not_running", tag=view.server.tag)
 			)
 			return False
-		session_name = view.tmux_session_name or build_tmux_session_name(view.server.tag)
-		if not self._session_exists(session_name):
+		container_name = view.docker_container_name or build_docker_container_name(view.server.tag)
+		if not self._session_exists(container_name):
 			self._set_status(
-				t("tui.command.tmux_missing", session_name=session_name)
+				t("tui.command.docker_missing", container_name=container_name)
 			)
 			return False
 		try:
-			send_tmux_command(session_name, command)
+			send_docker_command(container_name, command)
 		except Exception as exc:
 			self._set_status(t("tui.command.failed_status", error=format_error(exc)))
 			self._push_log(

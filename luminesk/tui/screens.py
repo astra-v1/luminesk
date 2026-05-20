@@ -12,7 +12,7 @@ from textual.widgets import Button, DataTable, Footer, Header, Input, RichLog, S
 from luminesk.core import doctor as dr
 from luminesk.core import manager as srv
 from luminesk.core.messages import t
-from luminesk.utils.tmux import build_tmux_session_name
+from luminesk.utils.docker import build_docker_container_name
 
 from .formatting import (
 	build_doctor_summary,
@@ -137,7 +137,6 @@ class HomeScreen(Screen):
 		Binding("r", "refresh_servers", t("common.refresh")),
 		Binding("d", "run_doctor", t("common.doctor")),
 		Binding("c", "show_create_server", t("common.create")),
-		Binding("g", "show_register_server", t("common.register")),
 		Binding("q", "quit", t("common.quit")),
 	]
 
@@ -146,6 +145,7 @@ class HomeScreen(Screen):
 		with Vertical(id="home-shell"):
 			yield Static("", id="status-banner")
 			yield Static("", id="progress-banner")
+			yield Static("", id="home-summary", classes="summary-line")
 			with Horizontal(id="home-content"):
 				with Vertical(id="home-main"):
 					with Container(classes="card fill-card"):
@@ -159,7 +159,6 @@ class HomeScreen(Screen):
 						with Vertical(id="action-stack"):
 							yield Button(t("tui.home.open_server"), id="open-server", variant="primary")
 							yield Button(t("tui.home.create_server"), id="create")
-							yield Button(t("tui.home.register_existing"), id="register")
 							yield Button(t("common.doctor"), id="doctor")
 							yield Button(t("common.refresh"), id="refresh")
 			with Container(classes="card", id="home-activity-card"):
@@ -177,6 +176,7 @@ class HomeScreen(Screen):
 			t("label.name"),
 			t("label.core"),
 			t("label.status"),
+			t("label.memory_limit"),
 			t("label.pid"),
 			t("label.uptime"),
 			t("tui.home.servers_table.last_start"),
@@ -188,7 +188,6 @@ class HomeScreen(Screen):
 		action_map = {
 			"open-server": self.action_open_selected_server,
 			"create": self.action_show_create_server,
-			"register": self.action_show_register_server,
 			"doctor": self.action_run_doctor,
 			"refresh": self.action_refresh_servers,
 		}
@@ -222,9 +221,6 @@ class HomeScreen(Screen):
 	def action_show_create_server(self) -> None:
 		self.app.show_create_server()
 
-	def action_show_register_server(self) -> None:
-		self.app.show_register_server()
-
 	def action_quit(self) -> None:
 		self.app.request_quit()
 
@@ -249,6 +245,7 @@ class HomeScreen(Screen):
 					view.server.name,
 					view.server.core_id,
 					render_runtime_status(view),
+					view.server.memory_limit,
 					str(view.pid or "-"),
 					srv.format_timedelta(view.uptime),
 					format_timestamp(view.last_started_at),
@@ -272,6 +269,11 @@ class HomeScreen(Screen):
 				self._suppress_table_events = False
 
 		selected_view = next((view for view in views if view.server.tag == selected_tag), None)
+		running_count = sum(1 for view in views if view.status == "running")
+		stopped_count = len(views) - running_count
+		self.query_one("#home-summary", Static).update(
+			f"Docker / servers: {len(views)} / running: {running_count} / stopped: {stopped_count}"
+		)
 		self.query_one("#selection-summary", Static).update(build_selection_text(selected_view))
 		self.query_one("#status-banner", Static).update(Text(status_message))
 		self.query_one("#progress-banner", Static).update(Text(progress_message))
@@ -279,7 +281,6 @@ class HomeScreen(Screen):
 
 		self.query_one("#open-server", Button).disabled = busy or selected_view is None
 		self.query_one("#create", Button).disabled = busy
-		self.query_one("#register", Button).disabled = busy
 		self.query_one("#doctor", Button).disabled = busy
 		self.query_one("#refresh", Button).disabled = busy
 		table.disabled = busy
@@ -394,12 +395,12 @@ class ServerScreen(Screen):
 			else t("tui.server.log_meta_missing")
 		)
 		command_input = self.query_one("#server-command-input", Input)
-		session_name = None if view is None else (view.tmux_session_name or build_tmux_session_name(view.server.tag))
+		container_name = None if view is None else (view.docker_container_name or build_docker_container_name(view.server.tag))
 		command_input.disabled = (
 			busy
 			or view is None
 			or view.status != "running"
-			or (session_name is not None and not self.app._session_exists(session_name))
+			or (container_name is not None and not self.app._session_exists(container_name))
 		)
 
 		if view is None:
@@ -416,6 +417,6 @@ class ServerScreen(Screen):
 
 		command_input.placeholder = t("tui.server.command_placeholder")
 
-		if session_name is not None and not self.app._session_exists(session_name):
-			command_input.placeholder = t("tui.server.tmux_missing")
+		if container_name is not None and not self.app._session_exists(container_name):
+			command_input.placeholder = t("tui.server.docker_missing")
 			return

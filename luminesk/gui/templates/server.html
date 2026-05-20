@@ -3,47 +3,67 @@
 {% block main_attrs %} data-server-tag="{{ server.tag }}" data-log-tail-limit="{{ log_tail_limit }}"{% endblock %}
 
 {% block content %}
-<section class="page-header">
-	<div>
-		<a class="secondary-link" href="/servers">&lt;- Back to servers</a>
-		<p class="eyebrow">Server</p>
+<header class="topbar">
+	<a class="brand" href="/servers">
+		<span class="brand-mark">L</span>
+		<span>
+			<strong>LumiNESK</strong>
+			<small>Docker control</small>
+		</span>
+	</a>
+	<a class="button secondary" href="/servers">Servers</a>
+</header>
+
+<section class="server-hero">
+	<div class="server-title">
+		<span class="badge {{ server.status_class }}">{{ server.status_label }}</span>
 		<h1>{{ server.name }}</h1>
-		<p class="subtitle">{{ server.tag }} / {{ server.core_id }} / {{ server.path }}</p>
+		<p><code>{{ server.tag }}</code> / {{ server.core_id }} / {{ server.jar_name }}</p>
 	</div>
-	<div class="action-group">
-		<button class="button" data-action="start">Start</button>
+	<div class="action-dock">
+		<label class="memory-control">
+			<span>Memory</span>
+			<input id="memory-limit-input" name="memory_limit" type="text" value="{{ server.memory_limit }}" />
+		</label>
+		<button class="button primary" data-action="start">Start</button>
 		<button class="button" data-action="stop">Stop</button>
 		<button class="button danger" data-action="kill">Kill</button>
 	</div>
 </section>
+
 <section class="details-grid">
-	<article class="panel">
-		<h2>Overview</h2>
+	<aside class="workspace-panel server-side">
+		<div class="section-toolbar">
+			<h2>Server</h2>
+			<span class="section-meta">Docker</span>
+		</div>
 		<dl class="details-list">
-			<div><dt>Status</dt><dd><span class="badge {{ server.status_class }}">{{ server.status_label }}</span></dd></div>
 			<div><dt>PID</dt><dd>{{ server.pid }}</dd></div>
+			<div><dt>Memory</dt><dd>{{ server.memory_limit }}</dd></div>
 			<div><dt>Core Version</dt><dd>{{ server.core_version }}</dd></div>
-			<div><dt>JAR</dt><dd>{{ server.jar_name }}</dd></div>
-			<div><dt>Path</dt><dd class="wrap">{{ server.path }}</dd></div>
+			<div><dt>Container</dt><dd>{{ server.docker_container_name }}</dd></div>
 			<div><dt>Last Start</dt><dd>{{ server.last_started_at }}</dd></div>
 			<div><dt>Last Stop</dt><dd>{{ server.last_stopped_at }}</dd></div>
-			<div><dt>tmux Session</dt><dd>{{ server.tmux_session_name }}</dd></div>
+			<div><dt>Path</dt><dd class="wrap">{{ server.path }}</dd></div>
 		</dl>
-	</article>
-	<article class="panel">
-		<h2>Console</h2>
-		<p class="panel-note">{{ command_hint }}</p>
+	</aside>
+
+	<section class="workspace-panel console-panel">
+		<div class="section-toolbar">
+			<h2>Console</h2>
+			<span class="section-meta" id="console-status">{{ server.status_label }}</span>
+		</div>
 		<div class="feedback" id="action-feedback" hidden></div>
 		<form id="command-form" class="command-form">
-			<input id="command-input" name="command" type="text" placeholder="say hello" {% if not command_available %}disabled{% endif %} />
+			<input id="command-input" name="command" type="text" placeholder="Command" {% if not command_available %}disabled{% endif %} />
 			<button class="button" type="submit" {% if not command_available %}disabled{% endif %}>Send</button>
 		</form>
 		<div class="console-meta">
-			<span>Status: <strong id="console-status">{{ server.status_label }}</strong></span>
+			<span>{{ command_hint }}</span>
 			<span id="console-log-path">{{ log_path_display }}</span>
 		</div>
 		<pre class="console-output" id="console-output">{{ console_text }}</pre>
-	</article>
+	</section>
 </section>
 {% endblock %}
 

@@ -1,37 +1,92 @@
-InputFormScreen {
+Screen {
+	background: #0d141b;
+	color: #e8f0f7;
+}
+
+Header {
+	background: #101a22;
+	color: #e8f0f7;
+	text-style: bold;
+}
+
+Footer {
+	background: #101a22;
+	color: #93a7b8;
+}
+
+InputFormScreen,
+DoctorResultsScreen {
 	align: center middle;
+}
+
+#dialog,
+#doctor-dialog {
+	border: round #2d4f5b;
+	background: #111c24;
+	padding: 1 2;
 }
 
 #dialog {
 	width: 84;
 	height: auto;
-	border: round #d38a2a;
-	background: #18202a;
-	padding: 1 2;
 }
 
-#dialog-title {
+#doctor-dialog {
+	width: 96;
+	height: 28;
+}
+
+#dialog-title,
+#doctor-title,
+.card-title {
 	text-style: bold;
-	color: #fff3d1;
+	color: #f4fbff;
 	padding-bottom: 1;
 }
 
-#dialog-description {
-	color: #a9b8c8;
-	padding-bottom: 1;
+#dialog-description,
+#doctor-summary,
+.section-copy,
+.copy-block {
+	color: #9eb0c0;
 }
 
 .dialog-label {
 	padding-top: 1;
-	color: #cfd8e3;
+	color: #c8d5df;
 }
 
 Input {
-	border: round #40546a;
-	background: #10161d;
+	border: tall #31515d;
+	background: #0b1117;
+	color: #e8f0f7;
 }
 
-.dialog-buttons {
+Input:focus {
+	border: tall #16a1ad;
+}
+
+Button {
+	border: tall #31515d;
+	background: #15232d;
+	color: #e8f0f7;
+}
+
+Button:hover {
+	background: #1c303b;
+}
+
+Button.-primary {
+	background: #087987;
+	color: #f4fbff;
+}
+
+Button:disabled {
+	color: #536576;
+}
+
+.dialog-buttons,
+#doctor-buttons {
 	height: auto;
 	padding-top: 1;
 }
@@ -40,52 +95,8 @@ Input {
 	margin-right: 1;
 }
 
-DoctorResultsScreen {
-	align: center middle;
-}
-
-#doctor-dialog {
-	width: 96;
-	height: 28;
-	border: round #4c8d9c;
-	background: #18202a;
-	padding: 1 2;
-}
-
-#doctor-title {
-	text-style: bold;
-	color: #dff8ff;
-	padding-bottom: 1;
-}
-
-#doctor-summary {
-	color: #a9b8c8;
-	padding-bottom: 1;
-}
-
 #doctor-table {
 	height: 1fr;
-}
-
-#doctor-buttons {
-	height: auto;
-	padding-top: 1;
-}
-
-Screen {
-	background: #0f141a;
-	color: #edf3fb;
-}
-
-Header {
-	background: #d38a2a;
-	color: #0f141a;
-	text-style: bold;
-}
-
-Footer {
-	background: #18202a;
-	color: #edf3fb;
 }
 
 #home-shell,
@@ -94,44 +105,27 @@ Footer {
 	padding: 1 2;
 }
 
-.card {
-	background: #18202a;
-	border: round #33485f;
-	padding: 1 2;
-}
-
-.accent-card {
-	border: round #d38a2a;
-	background: #151e27;
-}
-
-.section-copy,
-.copy-block {
-	color: #a9b8c8;
-}
-
-.card-title {
-	text-style: bold;
-	color: #edf3fb;
-	padding-bottom: 1;
-}
-
-#home-content {
-	height: auto;
-}
-
 #status-banner,
-#progress-banner {
+#progress-banner,
+#home-summary {
 	height: auto;
 	padding: 0 1 1 1;
 }
 
 #status-banner {
-	color: #edf3fb;
+	color: #e8f0f7;
 }
 
 #progress-banner {
-	color: #dcb86f;
+	color: #67e8f9;
+}
+
+.summary-line {
+	color: #8fa7b8;
+}
+
+#home-content {
+	height: auto;
 }
 
 #home-main {
@@ -143,6 +137,16 @@ Footer {
 	width: 1fr;
 }
 
+.card {
+	background: #111c24;
+	border: round #263d49;
+	padding: 1 2;
+}
+
+.card:focus-within {
+	border: round #16a1ad;
+}
+
 .fill-card {
 	height: 1fr;
 }
@@ -150,6 +154,32 @@ Footer {
 #servers-table {
 	height: 1fr;
 	margin-top: 1;
+	background: #0b1117;
+}
+
+DataTable {
+	background: #0b1117;
+	color: #d9e5ee;
+}
+
+DataTable > .datatable--header {
+	background: #14222d;
+	color: #91a9b9;
+	text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+	background: #0a5963;
+	color: #ffffff;
+}
+
+#selection-card {
+	height: auto;
+	margin-bottom: 1;
+}
+
+#actions-card {
+	height: auto;
 }
 
 #action-stack {
@@ -162,14 +192,14 @@ Footer {
 	margin-bottom: 1;
 }
 
-#selection-card {
-	height: auto;
-	margin-bottom: 1;
-}
-
 #home-activity-card {
 	height: 11;
 	margin-top: 1;
+}
+
+#home-activity-pane,
+#server-console {
+	height: 1fr;
 }
 
 #server-content {
@@ -183,7 +213,7 @@ Footer {
 }
 
 #server-console-column {
-	width: 1fr;
+	width: 2fr;
 }
 
 #server-details-card,
@@ -195,19 +225,15 @@ Footer {
 	height: 1fr;
 }
 
-#home-activity-pane,
-#server-console {
-	height: 1fr;
-}
-
 #server-console {
 	margin-top: 1;
-	border: round #40546a;
-	background: #10161d;
+	border: round #31515d;
+	background: #05090e;
+	color: #e8f0f7;
 }
 
 #server-command-input {
 	margin-top: 1;
-	border: round #40546a;
-	background: #10161d;
+	border: tall #31515d;
+	background: #0b1117;
 }

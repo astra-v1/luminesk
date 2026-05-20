@@ -35,7 +35,7 @@ Supported engines: [Nukkit](https://github.com/CloudburstMC/Nukkit), [PowerNukki
 
 # Features
 
-- create and register servers
+- create servers
 - start servers in **normal** and **loop mode**
 - stop and force terminate servers
 - manage server engines
@@ -53,7 +53,7 @@ Supported engines: [Nukkit](https://github.com/CloudburstMC/Nukkit), [PowerNukki
 |----------|--------------------------------|----------|
 | Python   | **3.13+** (3.14 recommended)   | Not required if you don't install via pip |
 | Java     | 21+                            | Required for running servers |
-| tmux     | latest                         | Optional (only for TUI/GUI usage) |
+| Docker   | latest                         | Required for TUI/GUI background launch |
 
 ---
 
@@ -192,14 +192,21 @@ Use `--token` or `LUMINESK_GUI_TOKEN` if you want a stable token.
 
 ---
 
-# Working with tmux
+# Working with Docker
 
-LumiNESK uses **[tmux](https://github.com/tmux/tmux/wiki)** to manage server consoles in TUI/GUI mode.
+LumiNESK uses **[Docker](https://www.docker.com/)** to run servers in the background from TUI/GUI mode.
+Background containers use the `eclipse-temurin:21-jre` image by default, mount the server directory into `/server`, use host networking on Linux and publish the default Bedrock port on Docker Desktop, and apply the server memory limit with Docker `--memory`.
 
-Attach to a console:
+Create a server with a custom background memory limit:
 
 ```bash
-tmux attach-session -t luminesk-<server-tag>
+nesk create -n "My Server" -d ./servers/my -c nukkit -t my_server --memory 2g
+```
+
+Follow container logs:
+
+```bash
+docker logs --follow luminesk-<server-tag>
 ```
 
 ---
@@ -210,7 +217,7 @@ Planned features:
 
 * [ ] Plugin manager and DevTools-like system (similar to PMMP)
 * [ ] Remote server management (yes, SSH exists, but still)
-* [ ] Docker support
+* [x] Docker background launch
 * [ ] Automatic and manual backups
 * [ ] Cluster mode implementation
 * [ ] One-line curl install script (for those who don't want Python/pip or manual binary downloads)

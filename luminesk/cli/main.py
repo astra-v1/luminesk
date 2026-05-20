@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import signal
-
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -19,6 +17,7 @@ from luminesk.core.config import UserConfig
 from luminesk.core.messages import set_language, t
 from luminesk.core.registry import registry
 from luminesk.main import __version__
+from luminesk.utils.docker import DEFAULT_DOCKER_MEMORY_LIMIT, normalize_memory_limit
 from luminesk.utils.rich_utils import (
 	AnimatedGradientText,
 	error_panel,
@@ -32,6 +31,7 @@ DirectoryOption = Annotated[Path | None, Parameter(name=["--dir", "-d"], help=t(
 CoreOption = Annotated[str | None, Parameter(name=["--core", "-c"], help=t("cli.create.option.core"))]
 TagOption = Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.create.option.tag"))]
 ForceOption = Annotated[bool, Parameter(name=["--force", "-f"], help=t("cli.create.option.force"))]
+MemoryOption = Annotated[str, Parameter(name=["--memory", "-m"], help=t("cli.create.option.memory"))]
 
 app = App(
 	name="luminesk",
@@ -75,9 +75,9 @@ def doctor() -> None:
 		live.update(label)
 		results.append(dr.check_java())
 
-		label.set_text(t("cli.doctor.checking_tmux"))
+		label.set_text(t("cli.doctor.checking_docker"))
 		live.update(label)
-		results.append(dr.check_tmux())
+		results.append(dr.check_docker())
 
 		label.set_text(t("cli.doctor.checking_sources"))
 		live.update(label)
@@ -138,8 +138,8 @@ def tui() -> None:
 			raise SystemExit(1) from exc
 		raise
 
-	if not dr.check_tmux().status:
-		console.print(error_panel(t("cli.tui.tmux_missing")))
+	if not dr.check_docker().status:
+		console.print(error_panel(t("cli.tui.docker_missing")))
 		raise SystemExit(1)
 
 	run_tui()
@@ -174,6 +174,7 @@ def create(
 	core: CoreOption = None,
 	tag: TagOption = None,
 	force: ForceOption = False,
+	memory: MemoryOption = DEFAULT_DOCKER_MEMORY_LIMIT,
 ) -> None:
 	"""Create a new server."""
 	config = _load_cli_config()
@@ -205,6 +206,7 @@ def create(
 		)
 
 	try:
+		memory_limit = normalize_memory_limit(memory)
 		server = srv.create_server(
 			config=config,
 			name=name,
@@ -213,6 +215,7 @@ def create(
 			core=selected_core,
 			force=force,
 			console=console,
+			memory_limit=memory_limit,
 		)
 	except (srv.ServerManagerError, ValueError) as exc:
 		console.print(error_panel(str(exc)))
@@ -228,59 +231,7 @@ def create(
 					f"{t('label.core')}: [cyan]{selected_core.name}[/cyan]",
 					f"{t('label.core_version')}: [cyan]{server.core_version or t('common.unknown')}[/cyan]",
 					f"{t('label.jar')}: [cyan]{server.jar_name}[/cyan]",
-					f"{t('label.path')}: [dim]{server.path}[/dim]",
-				]
-			)
-		)
-	)
-
-
-@app.command
-def register(
-	*,
-	directory: DirectoryOption = None,
-	jar: Annotated[Path | None, Parameter(name=["--jar", "-j"], help=t("cli.register.option.jar"))] = None,
-	name: NameOption = None,
-	tag: TagOption = None,
-) -> None:
-	"""Register an existing server that was created manually."""
-	config = _load_cli_config()
-	server_directory = (directory or Path.cwd()).expanduser()
-
-	if jar is None:
-		default_jar = _suggest_jar_path(server_directory)
-		jar = Path(Prompt.ask(t("cli.register.prompt.jar"), default=default_jar))
-
-	if name is None:
-		name = Prompt.ask(
-			t("cli.register.prompt.name"),
-			default=server_directory.resolve().name or t("common.manual_server_name"),
-		)
-
-	if tag is None:
-		tag = Prompt.ask(t("cli.register.prompt.tag"), default=name.lower().replace(" ", "_"))
-
-	try:
-		server = srv.register_existing_server(
-			config=config,
-			name=name,
-			tag=tag,
-			directory=server_directory,
-			jar_path=jar,
-		)
-	except (srv.ServerManagerError, ValueError) as exc:
-		console.print(error_panel(str(exc)))
-		raise SystemExit(1) from exc
-
-	console.print(
-		success_panel(
-			"\n".join(
-				[
-					t("cli.register.success_title"),
-					f"{t('label.name')}: [cyan]{server.name}[/cyan]",
-					f"{t('label.tag')}: [cyan]{server.tag}[/cyan]",
-					f"{t('label.core')}: [cyan]{server.core_id}[/cyan]",
-					f"{t('label.jar')}: [cyan]{server.jar_name}[/cyan]",
+					f"{t('label.memory_limit')}: [cyan]{server.memory_limit}[/cyan]",
 					f"{t('label.path')}: [dim]{server.path}[/dim]",
 				]
 			)
@@ -390,7 +341,7 @@ def stop(
 	force: Annotated[bool, Parameter(name=["--force", "-f"], help=t("cli.stop.option.force"))] = False,
 ) -> None:
 	"""Gracefully stop a server by tag or PID."""
-	_control_server(target=target, sig=signal.SIGTERM, force=force, action_name="stop")
+	_control_server(target=target, force=force, action_name="stop")
 
 
 @app.command
@@ -401,7 +352,7 @@ def kill(
 	force: Annotated[bool, Parameter(name=["--force", "-f"], help=t("cli.kill.option.force"))] = False,
 ) -> None:
 	"""Force-kill a server by tag or PID."""
-	_control_server(target=target, sig=signal.SIGKILL, force=force, action_name="kill")
+	_control_server(target=target, force=force, action_name="kill")
 
 
 @app.command(name="list")
@@ -453,7 +404,7 @@ def list_servers(
 			view.server.tag,
 			view.server.name,
 			view.server.core_id,
-			_format_status(view.status, view.loop_enabled, view.tmux_session_name),
+			_format_status(view.status, view.loop_enabled, view.docker_container_name),
 			str(view.pid or t("common.empty")),
 			srv.format_timedelta(view.uptime),
 			_format_datetime(view.last_started_at),
@@ -466,19 +417,16 @@ def list_servers(
 
 def _control_server(
 	target: str,
-	sig: signal.Signals,
 	force: bool,
 	action_name: str,
 ) -> None:
 	config = _load_cli_config()
 
 	try:
-		result = srv.send_signal_to_server(
-			config=config,
-			target=target,
-			sig=int(sig),
-			force=force,
-		)
+		if action_name == "kill":
+			result = srv.kill_server(config=config, target=target, force=force)
+		else:
+			result = srv.stop_server(config=config, target=target, force=force)
 	except srv.ServerManagerError as exc:
 		console.print(error_panel(str(exc)))
 		raise SystemExit(1) from exc
@@ -511,13 +459,13 @@ def _normalize_status_filter(status: str | None) -> str | None:
 def _format_status(
 	status: str,
 	loop_enabled: bool,
-	tmux_session_name: str | None = None,
+	docker_container_name: str | None = None,
 ) -> str:
 	suffixes = []
 	if loop_enabled:
 		suffixes.append(f"[yellow]{t('common.loop')}[/yellow]")
-	if tmux_session_name is not None:
-		suffixes.append(f"[cyan]{t('common.tmux_session', session_name=tmux_session_name)}[/cyan]")
+	if docker_container_name is not None:
+		suffixes.append(f"[cyan]{t('common.docker_container', container_name=docker_container_name)}[/cyan]")
 	suffix = f" [dim]({', '.join(suffixes)})[/dim]" if suffixes else ""
 	if status == "running":
 		return f"[green]{t('common.running')}[/green]{suffix}"
@@ -529,11 +477,3 @@ def _format_datetime(value: datetime | None) -> str:
 		return t("common.empty")
 
 	return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _suggest_jar_path(directory: Path) -> str:
-	resolved_directory = directory.expanduser().resolve()
-	jar_candidates = sorted(path.name for path in resolved_directory.glob("*.jar"))
-	if jar_candidates:
-		return jar_candidates[0]
-	return "server.jar"

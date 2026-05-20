@@ -4,10 +4,11 @@ from pathlib import Path
 import httpx
 import pytest
 
+from luminesk.core import manager
+from luminesk.core.config import ManagedServer, UserConfig
 from luminesk.core.manager import (
 	MAX_CORE_DOWNLOAD_BYTES,
 	ServerManagerError,
-	_detect_core_id,
 	_extract_file_name_from_content_disposition,
 	_parse_content_length,
 	_parse_sha256_checksum,
@@ -15,7 +16,6 @@ from luminesk.core.manager import (
 	_require_safe_download_file_name,
 	_resolve_download_file_name,
 	_resolve_download_target_path,
-	_resolve_server_jar_path,
 	_sanitize_cache_component,
 	_validate_download_size,
 	format_timedelta,
@@ -100,29 +100,59 @@ def test_parse_sha256_checksum() -> None:
 		_parse_sha256_checksum("not a checksum")
 
 
-def test_resolve_server_jar_path(tmp_path: Path) -> None:
-	jar = tmp_path / "server.jar"
-	jar.write_text("data", encoding="utf-8")
-	resolved = _resolve_server_jar_path(tmp_path, Path("server.jar"))
-	assert resolved == jar.resolve()
+def test_stop_server_stops_docker_container(monkeypatch, tmp_path: Path) -> None:
+	config = _running_docker_config(tmp_path)
+	calls: list[str] = []
 
-	outside = tmp_path.parent / "outside.jar"
-	outside.write_text("data", encoding="utf-8")
-	with pytest.raises(ServerManagerError):
-		_resolve_server_jar_path(tmp_path, outside)
+	monkeypatch.setattr(manager.UserConfig, "save", lambda self: None)
+	monkeypatch.setattr(manager, "docker_container_is_running", lambda _: True)
+	monkeypatch.setattr(manager, "get_docker_container_pid", lambda _: 1234)
+	monkeypatch.setattr(manager, "get_docker_container_exit_code", lambda _: 0)
+	monkeypatch.setattr(manager, "remove_docker_container", lambda _: calls.append("rm"))
+	monkeypatch.setattr(manager, "stop_docker_container", lambda name: calls.append(f"stop:{name}"))
+
+	result = manager.stop_server(config=config, target="test", force=True)
+
+	assert result.signal_name == "SIGTERM"
+	assert calls == ["stop:luminesk-test", "rm"]
+	assert config.get_server_by_tag("test").runtime.status == "stopped"
 
 
-def test_detect_core_id_prefers_config_file(tmp_path: Path) -> None:
-	(tmp_path / "pnx.yml").write_text("config", encoding="utf-8")
-	jar = tmp_path / "server.jar"
-	jar.write_text("data", encoding="utf-8")
-	assert _detect_core_id(tmp_path, jar) == "pnx"
+def test_kill_server_uses_cross_platform_docker_kill(monkeypatch, tmp_path: Path) -> None:
+	config = _running_docker_config(tmp_path)
+	calls: list[str] = []
+
+	monkeypatch.setattr(manager.UserConfig, "save", lambda self: None)
+	monkeypatch.setattr(manager, "docker_container_is_running", lambda _: True)
+	monkeypatch.setattr(manager, "get_docker_container_pid", lambda _: 1234)
+	monkeypatch.setattr(manager, "get_docker_container_exit_code", lambda _: 137)
+	monkeypatch.setattr(manager, "remove_docker_container", lambda _: calls.append("rm"))
+	monkeypatch.setattr(manager, "kill_docker_container", lambda name: calls.append(f"kill:{name}"))
+
+	result = manager.kill_server(config=config, target="test", force=True)
+
+	assert result.signal_name == "SIGKILL"
+	assert calls == ["kill:luminesk-test", "rm"]
+	assert config.get_server_by_tag("test").runtime.last_exit_code == 137
 
 
-def test_detect_core_id_uses_jar_name(tmp_path: Path) -> None:
-	jar = tmp_path / "PowerNukkitX-1.0.jar"
-	jar.write_text("data", encoding="utf-8")
-	assert _detect_core_id(tmp_path, jar) == "pnx"
+def _running_docker_config(tmp_path: Path) -> UserConfig:
+	server = ManagedServer(
+		name="Test",
+		tag="test",
+		path=tmp_path,
+		core_id="nukkit",
+		jar_name="server.jar",
+	)
+	config = UserConfig(servers={server.tag: server})
+	config.mark_server_started(
+		server.tag,
+		pid=1234,
+		docker_container_id="container-id",
+		docker_container_name="luminesk-test",
+		docker_memory_limit="1g",
+	)
+	return config
 
 
 def _dummy_core() -> CoreProvider:

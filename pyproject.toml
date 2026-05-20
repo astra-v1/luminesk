@@ -41,7 +41,7 @@ keywords = [
 	"cli",
 	"tool",
 	"tui",
-	"tmux",
+	"docker",
 	"fastapi",
 ]
 

@@ -16,17 +16,17 @@ def render_runtime_status(view: srv.ServerRuntimeView) -> str:
 	if view.status == "running":
 		if view.loop_enabled:
 			suffixes.append(t("common.loop"))
-		if view.tmux_session_name is not None:
+		if view.docker_container_name is not None:
 			suffixes.append(
-				t("common.tmux_session", session_name=view.tmux_session_name)
+				t("common.docker_container", container_name=view.docker_container_name)
 			)
 		return (
 			f"{t('common.running')} ({', '.join(suffixes)})"
 			if suffixes
 			else t("common.running")
 		)
-	if view.tmux_session_name is not None:
-		suffixes.append(t("common.tmux_session", session_name=view.tmux_session_name))
+	if view.docker_container_name is not None:
+		suffixes.append(t("common.docker_container", container_name=view.docker_container_name))
 	return (
 		f"{t('common.stopped')} ({', '.join(suffixes)})"
 		if suffixes
@@ -47,6 +47,7 @@ def build_selection_text(view: srv.ServerRuntimeView | None) -> Text:
 	lines = [
 		t("tui.selection.title", name=view.server.name, tag=view.server.tag),
 		f"{t('label.core')}: {view.server.core_id}",
+		f"{t('label.memory_limit')}: {view.server.memory_limit}",
 		f"{t('label.status')}: {render_runtime_status(view)}",
 		f"{t('label.jar')}: {view.server.jar_name}",
 		f"{t('label.last_start')}: {format_timestamp(view.last_started_at)}",
@@ -64,12 +65,14 @@ def build_server_snapshot_text(view: srv.ServerRuntimeView | None) -> Text:
 		f"{t('label.core')}: {view.server.core_id}",
 		f"{t('label.core_version')}: {view.server.core_version or t('common.manual_unknown')}",
 		f"{t('label.jar')}: {view.server.jar_name}",
+		f"{t('label.memory_limit')}: {view.server.memory_limit}",
 		f"{t('label.status')}: {render_runtime_status(view)}",
 		f"{t('label.pid')}: {view.pid or t('common.empty')}",
 		f"{t('label.uptime')}: {srv.format_timedelta(view.uptime)}",
 		f"{t('label.last_start')}: {format_timestamp(view.last_started_at)}",
 		f"{t('label.last_stop')}: {format_timestamp(view.last_stopped_at)}",
 		f"{t('label.last_exit_code')}: {view.last_exit_code if view.last_exit_code is not None else t('common.empty')}",
+		f"{t('label.docker_container')}: {view.docker_container_name or t('common.empty')}",
 		f"{t('label.path')}: {view.server.path}",
 	]
 	return Text("\n".join(lines))

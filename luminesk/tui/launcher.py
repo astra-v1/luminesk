@@ -1,60 +1,46 @@
 from __future__ import annotations
 
-import os
-import shlex
-import shutil
 import subprocess
-import sys
 
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from luminesk.core.config import UserConfig
 from luminesk.core.messages import t
-from luminesk.utils.tmux import (
-	build_tmux_attach_command,
-	build_tmux_session_name,
+from luminesk.utils.docker import (
+	DEFAULT_DOCKER_IMAGE,
+	build_docker_container_name,
+	build_docker_logs_command,
+	build_docker_run_command,
+	docker_container_is_running,
+	get_docker_binary,
+	get_docker_container_pid,
+	normalize_memory_limit,
+	remove_docker_container,
 )
-
-
-APP_ROOT = Path(__file__).resolve().parents[2]
 
 
 class ServerLaunchTarget(Protocol):
 	tag: str
 	path: Path
+	jar_name: str
+	memory_limit: str
 
 
 @dataclass(slots=True, frozen=True)
 class DetachedLaunchResult:
-	session_name: str
+	container_id: str
+	container_name: str
 	command: tuple[str, ...]
 	attach_command: tuple[str, ...]
 	log_path: Path
+	memory_limit: str
 
-
-def build_start_command(tag: str, loop: bool = False) -> tuple[str, ...]:
-	command = [sys.executable, "-m", "luminesk", "start", "--tag", tag]
-	if loop:
-		command.append("--loop")
-	return tuple(command)
-
-
-def build_launch_environment(app_root: Path = APP_ROOT) -> dict[str, str]:
-	env = os.environ.copy()
-	app_root_str = str(app_root)
-	existing_pythonpath = env.get("PYTHONPATH", "")
-
-	if not existing_pythonpath:
-		env["PYTHONPATH"] = app_root_str
-		return env
-
-	parts = existing_pythonpath.split(os.pathsep)
-	if app_root_str not in parts:
-		env["PYTHONPATH"] = os.pathsep.join((app_root_str, existing_pythonpath))
-
-	return env
+	@property
+	def session_name(self) -> str:
+		return self.container_name
 
 
 def build_log_path(server: ServerLaunchTarget, now: datetime | None = None) -> Path:
@@ -62,68 +48,81 @@ def build_log_path(server: ServerLaunchTarget, now: datetime | None = None) -> P
 	return server.path / ".luminesk" / "logs" / f"{server.tag}-{timestamp}.log"
 
 
-def build_tmux_command(
-	server: ServerLaunchTarget,
-	log_path: Path,
-	loop: bool = False,
-	app_root: Path = APP_ROOT,
-) -> tuple[str, ...]:
-	env = build_launch_environment(app_root)
-	start_command = [
-		"env",
-		f"PYTHONPATH={env['PYTHONPATH']}",
-		*build_start_command(server.tag, loop=loop),
-	]
-	session_command = " ".join(shlex.quote(part) for part in start_command)
-	log_parent = shlex.quote(str(log_path.parent))
-	log_target = shlex.quote(str(log_path))
-	return (
-		"bash",
-		"-lc",
-		f"mkdir -p {log_parent} && exec {session_command} 2>&1 | tee -a {log_target}",
-	)
-
-
 def launch_server_detached(
 	server: ServerLaunchTarget,
 	loop: bool = False,
-	app_root: Path = APP_ROOT,
+	*,
+	memory_limit: str | None = None,
+	image: str = DEFAULT_DOCKER_IMAGE,
+	config: UserConfig | None = None,
 ) -> DetachedLaunchResult:
-	tmux_bin = shutil.which("tmux")
-	if tmux_bin is None:
-		raise RuntimeError(t("launcher.tmux_not_found"))
-
+	docker_bin = get_docker_binary()
+	normalized_memory_limit = normalize_memory_limit(memory_limit or server.memory_limit)
 	log_path = build_log_path(server)
 	log_path.parent.mkdir(parents=True, exist_ok=True)
-	command = build_tmux_command(server, log_path, loop=loop, app_root=app_root)
-	session_name = build_tmux_session_name(server.tag)
-	attach_command = build_tmux_attach_command(session_name)
+
+	container_name = build_docker_container_name(server.tag)
+	if docker_container_is_running(container_name):
+		raise RuntimeError(t("launcher.docker_container_exists", container_name=container_name))
+	remove_docker_container(container_name)
+
+	command = build_docker_run_command(
+		server,
+		log_path,
+		container_name=container_name,
+		image=image,
+		loop=loop,
+		memory_limit=normalized_memory_limit,
+	)
+	attach_command = build_docker_logs_command(container_name)
 
 	with log_path.open("a", encoding="utf-8") as log_file:
 		log_file.write(
-			f"[{datetime.now().astimezone().isoformat()}] Launching tmux session {session_name}: "
+			f"[{datetime.now().astimezone().isoformat()}] Launching Docker container {container_name}: "
 			f"{' '.join(command)}\n"
 		)
-		subprocess.run(
-			[
-				tmux_bin,
-				"new-session",
-				"-d",
-				"-s",
-				session_name,
-				"-c",
-				str(server.path),
-				*command,
-			],
-			check=True,
-			stdout=log_file,
-			stderr=subprocess.STDOUT,
+		result = subprocess.run(
+			[docker_bin, *command[1:]],
+			check=False,
+			stdout=subprocess.PIPE,
+			stderr=subprocess.PIPE,
 			text=True,
+			encoding="utf-8",
+			errors="replace",
 		)
+		if result.stderr:
+			log_file.write(result.stderr)
+		if result.returncode != 0:
+			error = result.stderr.strip() or f"exit code {result.returncode}"
+			raise RuntimeError(
+				t(
+					"launcher.docker_run_failed",
+					exit_code=result.returncode,
+					error=error,
+				)
+			)
+
+	container_id = result.stdout.strip()
+	pid = get_docker_container_pid(container_name)
+	loaded_config = config or UserConfig.load()
+	registered_server = loaded_config.get_server_by_tag(server.tag)
+	if registered_server is not None:
+		registered_server.memory_limit = normalized_memory_limit
+	loaded_config.mark_server_started(
+		server.tag,
+		pid=pid,
+		loop_enabled=loop,
+		docker_container_id=container_id,
+		docker_container_name=container_name,
+		docker_memory_limit=normalized_memory_limit,
+	)
+	loaded_config.save()
 
 	return DetachedLaunchResult(
-		session_name=session_name,
+		container_id=container_id,
+		container_name=container_name,
 		command=command,
 		attach_command=attach_command,
 		log_path=log_path,
+		memory_limit=normalized_memory_limit,
 	)

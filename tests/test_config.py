@@ -28,6 +28,18 @@ def test_managed_server_rejects_empty_name(tmp_path: Path) -> None:
 		)
 
 
+def test_managed_server_normalizes_memory_limit(tmp_path: Path) -> None:
+	server = config.ManagedServer(
+		name="Test",
+		tag="test",
+		path=tmp_path,
+		core_id="nukkit",
+		jar_name="server.jar",
+		memory_limit=" 2G ",
+	)
+	assert server.memory_limit == "2g"
+
+
 def test_get_server_by_directory_prefers_deepest_match(tmp_path: Path) -> None:
 	root = tmp_path / "servers"
 	server_a_path = root / "alpha"
