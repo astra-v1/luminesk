@@ -23,11 +23,7 @@ The project is designed for:
 - small production deployments
 - convenient management of multiple servers
 
-LumiNESK combines:
-
-- **CLI** (command-line interface)
-- **TUI** (interactive terminal interface)
-- **Web GUI** (browser-based interface)
+LumiNESK is maintained as a **CLI** (command-line interface) tool.
 
 Supported engines: [Nukkit](https://github.com/CloudburstMC/Nukkit), [PowerNukkitX](https://github.com/PowerNukkitX/PowerNukkitX), [Nukkit-MOT](https://github.com/MemoriesOfTime/Nukkit-MOT), [Lumi](https://github.com/koshakminedev/lumi).
 
@@ -40,8 +36,6 @@ Supported engines: [Nukkit](https://github.com/CloudburstMC/Nukkit), [PowerNukki
 - stop and force terminate servers
 - manage server engines
 - environment and provider diagnostics
-- TUI interface with live console
-- Web GUI for monitoring
 - manage multiple servers
 - update server engines
 
@@ -53,7 +47,7 @@ Supported engines: [Nukkit](https://github.com/CloudburstMC/Nukkit), [PowerNukki
 |----------|--------------------------------|----------|
 | Python   | **3.13+** (3.14 recommended)   | Not required if you don't install via pip |
 | Java     | 21+                            | Required for running servers |
-| Docker   | latest                         | Required for TUI/GUI background launch |
+| Docker   | latest                         | Required for Docker-backed server runtime |
 
 ---
 
@@ -124,8 +118,6 @@ Linux/macOS:
 
 ```bash
 nuitka --onefile --output-filename=luminesk \
-  --include-package-data=luminesk.gui \
-  --include-package-data=luminesk.tui \
   luminesk/__main__.py
 ```
 
@@ -133,8 +125,6 @@ Windows:
 
 ```bash
 nuitka --onefile --output-filename=luminesk.exe ^
-  --include-package-data=luminesk.gui ^
-  --include-package-data=luminesk.tui ^
   luminesk/__main__.py
 ```
 
@@ -181,20 +171,11 @@ List servers:
 nesk list
 ```
 
-Run the local web GUI:
-
-```bash
-nesk gui
-```
-
-The GUI binds to `127.0.0.1` by default and prints a one-time access URL containing a startup token.
-Use `--token` or `LUMINESK_GUI_TOKEN` if you want a stable token.
-
 ---
 
 # Working with Docker
 
-LumiNESK uses **[Docker](https://www.docker.com/)** to run servers in the background from TUI/GUI mode.
+LumiNESK keeps **[Docker](https://www.docker.com/)** runtime support for background server workflows.
 Background containers use the `eclipse-temurin:21-jre` image by default, mount the server directory into `/server`, use host networking on Linux and publish the default Bedrock port on Docker Desktop, and apply the server memory limit with Docker `--memory`.
 
 Create a server with a custom background memory limit:

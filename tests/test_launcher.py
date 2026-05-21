@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from luminesk.core.config import ManagedServer, UserConfig
-from luminesk.tui import launcher
+from luminesk.core import launcher
 
 
 def test_launch_server_detached_marks_docker_runtime(

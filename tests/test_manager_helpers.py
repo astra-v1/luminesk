@@ -136,6 +136,41 @@ def test_kill_server_uses_cross_platform_docker_kill(monkeypatch, tmp_path: Path
 	assert config.get_server_by_tag("test").runtime.last_exit_code == 137
 
 
+def test_delete_server_removes_registration_without_deleting_files(monkeypatch, tmp_path: Path) -> None:
+	server_dir = tmp_path / "test"
+	server_dir.mkdir()
+	jar_path = server_dir / "server.jar"
+	jar_path.write_text("jar", encoding="utf-8")
+	server = ManagedServer(
+		name="Test",
+		tag="test",
+		path=server_dir,
+		core_id="nukkit",
+		jar_name="server.jar",
+	)
+	config = UserConfig(servers={server.tag: server})
+	monkeypatch.setattr(manager.UserConfig, "save", lambda self: None)
+
+	deleted = manager.delete_server(config=config, target="test")
+
+	assert deleted == server
+	assert config.get_server_by_tag("test") is None
+	assert jar_path.is_file()
+
+
+def test_delete_server_requires_stopped_server(monkeypatch, tmp_path: Path) -> None:
+	config = _running_docker_config(tmp_path)
+
+	monkeypatch.setattr(manager.UserConfig, "save", lambda self: None)
+	monkeypatch.setattr(manager, "docker_container_is_running", lambda _: True)
+	monkeypatch.setattr(manager, "get_docker_container_pid", lambda _: 1234)
+
+	with pytest.raises(ServerManagerError, match="must be stopped"):
+		manager.delete_server(config=config, target="test")
+
+	assert config.get_server_by_tag("test") is not None
+
+
 def _running_docker_config(tmp_path: Path) -> UserConfig:
 	server = ManagedServer(
 		name="Test",

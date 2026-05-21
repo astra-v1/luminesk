@@ -1,1 +1,0 @@
-LOG_TAIL_LIMIT = 200

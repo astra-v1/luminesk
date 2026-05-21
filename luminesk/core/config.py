@@ -132,6 +132,12 @@ class UserConfig(BaseModel):
 	def register_server(self, server: ManagedServer) -> None:
 		self.servers[server.tag] = server
 
+	def unregister_server(self, tag: str) -> ManagedServer:
+		server = self.get_server_by_tag(tag)
+		if server is None:
+			raise KeyError(t("config.server.not_found", tag=tag))
+		return self.servers.pop(server.tag)
+
 	def get_server_by_tag(self, tag: str) -> ManagedServer | None:
 		return self.servers.get(tag.strip().lower())
 

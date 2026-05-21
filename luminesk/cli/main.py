@@ -127,46 +127,6 @@ def cores() -> None:
 
 
 @app.command
-def tui() -> None:
-	"""Launch the LumiNESK text UI."""
-	_load_cli_config()
-	try:
-		from luminesk.tui import run_tui
-	except ModuleNotFoundError as exc:
-		if exc.name == "textual":
-			console.print(error_panel(t("cli.tui.textual_missing")))
-			raise SystemExit(1) from exc
-		raise
-
-	if not dr.check_docker().status:
-		console.print(error_panel(t("cli.tui.docker_missing")))
-		raise SystemExit(1)
-
-	run_tui()
-
-
-@app.command
-def gui(
-	*,
-	host: Annotated[str, Parameter(name="--host", help="Bind host.")] = "127.0.0.1",
-	port: Annotated[int, Parameter(name="--port", help="Bind port.")] = 8000,
-	reload: Annotated[bool, Parameter(name="--reload", help="Enable auto-reload for development.")] = False,
-	token: Annotated[str | None, Parameter(name="--token", help="GUI access token.")] = None,
-) -> None:
-	"""Run the web GUI."""
-	_load_cli_config()
-	try:
-		from luminesk.gui import run
-	except ModuleNotFoundError as exc:
-		if exc.name in {"fastapi", "uvicorn", "jinja2"}:
-			console.print(error_panel("GUI dependencies are missing. Install LumiNESK with the `gui` extra."))
-			raise SystemExit(1) from exc
-		raise
-
-	run(host=host, port=port, reload=reload, token=token)
-
-
-@app.command
 def create(
 	*,
 	name: NameOption = None,
@@ -353,6 +313,33 @@ def kill(
 ) -> None:
 	"""Force-kill a server by tag or PID."""
 	_control_server(target=target, force=force, action_name="kill")
+
+
+@app.command
+def delete(
+	target: Annotated[str, Parameter(help=t("cli.delete.argument.target"))],
+	/,
+) -> None:
+	"""Delete a stopped server from LumiNESK without touching server files."""
+	config = _load_cli_config()
+
+	try:
+		server = srv.delete_server(config=config, target=target)
+	except srv.ServerManagerError as exc:
+		console.print(error_panel(str(exc)))
+		raise SystemExit(1) from exc
+
+	console.print(
+		success_panel(
+			"\n".join(
+				[
+					t("cli.delete.success_title"),
+					f"{t('label.server')}: [cyan]{server.name}[/cyan] ([cyan]{server.tag}[/cyan])",
+					f"{t('label.path')}: [dim]{server.path}[/dim]",
+				]
+			)
+		)
+	)
 
 
 @app.command(name="list")

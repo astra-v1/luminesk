@@ -501,6 +501,20 @@ def change_server_core(
 	return resolved_server
 
 
+def delete_server(config: UserConfig, target: str) -> ManagedServer:
+	resolved_server = resolve_server(config=config, tag=target, directory=None)
+	runtime_view = get_runtime_view(config, resolved_server)
+
+	if runtime_view.status == "running" or runtime_view.loop_enabled:
+		raise ServerManagerError(
+			t("manager.server_must_be_stopped_for_delete", tag=resolved_server.tag)
+		)
+
+	deleted_server = config.unregister_server(resolved_server.tag)
+	config.save()
+	return deleted_server
+
+
 def run_server(
 	config: UserConfig,
 	server: ManagedServer,

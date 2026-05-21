@@ -65,6 +65,27 @@ def test_get_server_by_directory_prefers_deepest_match(tmp_path: Path) -> None:
 	assert match == server_b
 
 
+def test_unregister_server_removes_only_registration(tmp_path: Path) -> None:
+	server_dir = tmp_path / "server"
+	server_dir.mkdir()
+	server_file = server_dir / "server.jar"
+	server_file.write_text("jar", encoding="utf-8")
+	server = config.ManagedServer(
+		name="Test",
+		tag="Test",
+		path=server_dir,
+		core_id="nukkit",
+		jar_name="server.jar",
+	)
+	user_config = config.UserConfig(servers={server.tag: server})
+
+	deleted = user_config.unregister_server("test")
+
+	assert deleted == server
+	assert user_config.get_server_by_tag("test") is None
+	assert server_file.is_file()
+
+
 def test_migrate_legacy_config_creates_servers(tmp_path: Path) -> None:
 	legacy_dir = tmp_path / "legacy"
 	legacy_dir.mkdir()
