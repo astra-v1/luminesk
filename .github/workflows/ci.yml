@@ -4,6 +4,9 @@ on:
   push:
     tags: ["v*"]
 
+env:
+  LUMINESK_REGISTRY_URL: "https://gist.githubusercontent.com/Taskov1ch/27b513878dc2a9c0c29f97423a3bc566/raw/c3e10e9763fbbbc76193a5f35489fffd9821a6d1/registry.json"
+
 jobs:
   test:
     name: Test (${{ matrix.os }})
@@ -66,7 +69,7 @@ jobs:
           chmod +x "$BIN" || true
           ./"$BIN" --help
           ./"$BIN" --version
-          ./"$BIN" doctor
+          ./"$BIN" diagnostic
           ./"$BIN" create -n "CI-Test" -d "./test-server" -c "pnx" -t "test"
           ./"$BIN" cores
 

@@ -18,7 +18,7 @@ def test_launch_server_detached_marks_docker_runtime(
 		core_id="nukkit",
 		jar_name="server.jar",
 	)
-	config = UserConfig(servers={server.tag: server})
+	config = UserConfig(servers={server.tag: server}, db_path=tmp_path / "state.sqlite3")
 
 	def fake_run(args, **kwargs):
 		return subprocess.CompletedProcess(args=args, returncode=0, stdout="container-id\n")
@@ -73,4 +73,7 @@ def test_launch_server_detached_surfaces_docker_stderr(
 	monkeypatch.setattr(launcher.subprocess, "run", fake_run)
 
 	with pytest.raises(RuntimeError, match="docker daemon is not running"):
-		launcher.launch_server_detached(server, config=UserConfig(servers={server.tag: server}))
+		launcher.launch_server_detached(
+			server,
+			config=UserConfig(servers={server.tag: server}, db_path=tmp_path / "state.sqlite3"),
+		)

@@ -7,6 +7,8 @@ from typing import Any, Iterator, Mapping
 
 import httpx
 
+from luminesk.core.messages import t
+
 
 DEFAULT_RETRY_ATTEMPTS = 3
 DEFAULT_RETRY_DELAY_SECONDS = 3.0
@@ -54,7 +56,7 @@ def request_with_retries(
 	if last_exception:
 		raise last_exception
 
-	raise RuntimeError("Request failed without an exception.")
+	raise RuntimeError(t("http.request_failed_without_exception"))
 
 
 def get_json_object_with_retries(
@@ -73,7 +75,7 @@ def get_json_object_with_retries(
 	)
 	payload = response.json()
 	if not isinstance(payload, dict):
-		raise ValueError("JSON response is not an object.")
+		raise ValueError(t("http.json_not_object"))
 	return payload
 
 
@@ -112,4 +114,4 @@ def stream_with_retries(
 	if last_exception:
 		raise last_exception
 
-	raise RuntimeError("Stream request failed without an exception.")
+	raise RuntimeError(t("http.stream_failed_without_exception"))

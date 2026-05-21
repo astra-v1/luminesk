@@ -102,15 +102,14 @@ def test_migrate_legacy_config_creates_servers(tmp_path: Path) -> None:
 	assert servers["legacy"]["jar_name"] == "core.jar"
 
 
-def test_save_writes_config_atomically(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_save_writes_sqlite_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 	config_dir = tmp_path / "config"
-	config_file = config_dir / "config.json"
+	config_db_file = config_dir / "state.sqlite3"
 	monkeypatch.setattr(config, "CONFIG_DIR", config_dir)
-	monkeypatch.setattr(config, "CONFIG_FILE", config_file)
+	monkeypatch.setattr(config, "CONFIG_DB_FILE", config_db_file)
 
-	user_config = config.UserConfig()
+	user_config = config.UserConfig(db_path=config_db_file)
 	user_config.save()
 
-	assert config_file.is_file()
-	assert not list(config_dir.glob("*.tmp"))
+	assert config_db_file.is_file()
 	assert config.UserConfig.load().language == config.DEFAULT_LANGUAGE

@@ -46,8 +46,8 @@ Supported engines: [Nukkit](https://github.com/CloudburstMC/Nukkit), [PowerNukki
 | Component | Version                        | Required |
 |----------|--------------------------------|----------|
 | Python   | **3.13+** (3.14 recommended)   | Not required if you don't install via pip |
-| Java     | 21+                            | Required for running servers |
-| Docker   | latest                         | Required for Docker-backed server runtime |
+| Java     | 21+                            | Provided by the Docker runtime image |
+| Docker   | latest                         | Required for running servers |
 
 ---
 
@@ -141,7 +141,7 @@ nesk --help
 Check environment and sources:
 
 ```bash
-nesk doctor
+nesk diagnostic
 ```
 
 Create a server:
@@ -154,15 +154,14 @@ nesk create -n "My Server" -d ./servers/my -c nukkit -t my_server
 Start a server:
 
 ```bash
-nesk start -t my_server
+nesk start my_server
 # or run inside the server directory
 ```
 
 Stop a server:
 
 ```bash
-nesk stop -t my_server
-# or run inside the server directory
+nesk stop my_server
 ```
 
 List servers:
@@ -173,10 +172,9 @@ nesk list
 
 ---
 
-# Working with Docker
+# Runtime
 
-LumiNESK keeps **[Docker](https://www.docker.com/)** runtime support for background server workflows.
-Background containers use the `eclipse-temurin:21-jre` image by default, mount the server directory into `/server`, use host networking on Linux and publish the default Bedrock port on Docker Desktop, and apply the server memory limit with Docker `--memory`.
+LumiNESK starts servers through **[Docker](https://www.docker.com/)**. Containers use the `eclipse-temurin:21-jre` image by default, mount the server directory into `/server`, use host networking on Linux and publish the default Bedrock port on Docker Desktop, and apply the server memory limit with Docker `--memory`.
 
 Create a server with a custom background memory limit:
 
@@ -184,10 +182,48 @@ Create a server with a custom background memory limit:
 nesk create -n "My Server" -d ./servers/my -c nukkit -t my_server --memory 2g
 ```
 
-Follow container logs:
+Start and attach to logs immediately:
+
+```bash
+nesk start my_server
+```
+
+Start in the background:
+
+```bash
+nesk start my_server --detached
+```
+
+Follow container logs manually:
 
 ```bash
 docker logs --follow luminesk-<server-tag>
+```
+
+--- 
+
+# Core Registry
+
+Core metadata is loaded from JSON. Set `LUMINESK_REGISTRY_URL` to a raw GitHub Gist JSON URL; LumiNESK caches the payload and can reuse the cached copy when the network is unavailable.
+
+Expected shape:
+
+```json
+{
+  "version": 1,
+  "cores": [
+    {
+      "type": "maven",
+      "id": "nukkit",
+      "name": "Nukkit",
+      "description": "Original Minecraft server core.",
+      "url": "https://repo.opencollab.dev/maven-snapshots",
+      "group_id": "cn.nukkit",
+      "artifact_id": "nukkit",
+      "is_snapshot": true
+    }
+  ]
+}
 ```
 
 ---

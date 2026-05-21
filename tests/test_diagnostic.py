@@ -1,4 +1,4 @@
-from luminesk.core import doctor
+from luminesk.core import diagnostic
 
 
 class FakeCore:
@@ -13,19 +13,19 @@ class FakeCore:
 		return self._url
 
 
-def test_check_download_sources_preserves_registry_order(monkeypatch) -> None:
+def test_check_repositories_preserves_registry_order(monkeypatch) -> None:
 	cores = [
 		FakeCore("first", "First", "https://example.com/first"),
 		FakeCore("second", "Second", "https://example.com/second"),
 	]
 
-	def fake_check_source(client, core_name: str, check_url: str) -> doctor.DiagnosticResult:
-		return doctor.DiagnosticResult(name=core_name, status=True, message=check_url)
+	def fake_check_source(client, core_name: str, check_url: str) -> diagnostic.DiagnosticResult:
+		return diagnostic.DiagnosticResult(name=core_name, status=True, message=check_url)
 
-	monkeypatch.setattr(doctor.registry, "get_all", lambda: cores)
-	monkeypatch.setattr(doctor, "_check_source", fake_check_source)
+	monkeypatch.setattr(diagnostic.registry, "get_all", lambda: cores)
+	monkeypatch.setattr(diagnostic, "_check_source", fake_check_source)
 
-	results = doctor.check_download_sources()
+	results = diagnostic.check_repositories()
 
 	assert [result.name for result in results] == ["First", "Second"]
 	assert [result.message for result in results] == [
@@ -34,14 +34,14 @@ def test_check_download_sources_preserves_registry_order(monkeypatch) -> None:
 	]
 
 
-def test_check_download_sources_wraps_source_errors(monkeypatch) -> None:
+def test_check_repositories_wraps_source_errors(monkeypatch) -> None:
 	monkeypatch.setattr(
-		doctor.registry,
+		diagnostic.registry,
 		"get_all",
 		lambda: [FakeCore("broken", "Broken", "raise")],
 	)
 
-	result = doctor.check_download_sources()[0]
+	result = diagnostic.check_repositories()[0]
 
 	assert result.name == "Broken Source"
 	assert not result.status

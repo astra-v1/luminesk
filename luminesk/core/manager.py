@@ -13,11 +13,11 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
 from urllib.parse import unquote, urlparse
 
 import httpx
 
+from rich.panel import Panel
 from rich.console import Console
 from rich.progress import (
 	BarColumn,
@@ -30,6 +30,7 @@ from rich.progress import (
 )
 
 from luminesk.core.config import CORE_CACHE_DIR, ManagedServer, UserConfig, utc_now
+from luminesk.core import launcher
 from luminesk.core.messages import t
 from luminesk.core.registry import CoreProvider, registry
 from luminesk.utils.downloads import get_latest_download_info
@@ -43,10 +44,10 @@ from luminesk.utils.docker import (
 	remove_docker_container,
 	stop_docker_container,
 	kill_docker_container,
+	send_docker_command,
 )
 
 
-RESTART_DELAY_SECONDS = 5
 MAX_CORE_DOWNLOAD_BYTES = 512 * 1024 * 1024
 SHA256_HEX_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
 CORE_DOWNLOAD_TIMEOUT = httpx.Timeout(
@@ -82,7 +83,6 @@ class ServerRuntimeView:
 @dataclass(slots=True, frozen=True)
 class ResolvedServerTarget:
 	server: ManagedServer
-	resolved_by: Literal["tag", "pid"]
 	value: str
 
 
@@ -92,9 +92,7 @@ class ServerSignalResult:
 	signal_name: str
 	server_pid: int | None
 	loop_active: bool
-	force: bool
 	signaled_server: bool
-	docker_container_name: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -231,8 +229,11 @@ def download_core(
 				if not hmac.compare_digest(actual_sha256, expected_sha256):
 					_cleanup_path(temp_path)
 					raise ServerManagerError(
-						"Downloaded core SHA-256 mismatch: "
-						f"expected {expected_sha256}, got {actual_sha256}."
+						t(
+							"manager.download_sha256_mismatch",
+							expected_sha256=expected_sha256,
+							actual_sha256=actual_sha256,
+						)
 					)
 
 				temp_path.replace(target_path)
@@ -284,7 +285,6 @@ def resolve_server_target(config: UserConfig, target: str) -> ResolvedServerTarg
 	if server is not None:
 		return ResolvedServerTarget(
 			server=server,
-			resolved_by="tag",
 			value=normalized_target,
 		)
 
@@ -296,7 +296,6 @@ def resolve_server_target(config: UserConfig, target: str) -> ResolvedServerTarg
 			)
 		return ResolvedServerTarget(
 			server=server,
-			resolved_by="pid",
 			value=normalized_target,
 		)
 
@@ -412,7 +411,7 @@ def send_signal_to_server(
 			if _is_kill_signal(sig):
 				kill_docker_container(docker_container_name)
 			else:
-				stop_docker_container(docker_container_name)
+				_stop_docker_server_gracefully(docker_container_name, force=force)
 			signaled_server = True
 		except RuntimeError as exc:
 			raise ServerManagerError(str(exc)) from exc
@@ -427,9 +426,7 @@ def send_signal_to_server(
 			signal_name=_get_signal_name(sig),
 			server_pid=server.runtime.pid,
 			loop_active=loop_active,
-			force=force,
 			signaled_server=signaled_server,
-			docker_container_name=docker_container_name,
 		)
 
 	if force and loop_active:
@@ -453,7 +450,6 @@ def send_signal_to_server(
 		signal_name=_get_signal_name(sig),
 		server_pid=server.runtime.pid if server_pid_alive else None,
 		loop_active=loop_active,
-		force=force,
 		signaled_server=signaled_server,
 	)
 
@@ -519,83 +515,66 @@ def run_server(
 	config: UserConfig,
 	server: ManagedServer,
 	loop: bool = False,
+	detached: bool = False,
 	console: Console | None = None,
 ) -> int:
 	sync_runtime_states(config)
-	runtime_view = get_runtime_view(config, server)
+	runtime_view = _build_runtime_view(config, server)
 
 	if runtime_view.status == "running":
 		raise ServerManagerError(
 			t("manager.server_already_running", tag=server.tag, pid=runtime_view.pid)
 		)
 
-	java_bin = shutil.which("java")
-	if java_bin is None:
-		raise ServerManagerError(t("manager.java_not_in_path"))
-
 	if not server.jar_path.is_file():
 		raise ServerManagerError(
 			t("manager.jar_not_found", jar_path=server.jar_path)
 		)
 
-	last_exit_code = 0
-
-	while True:
-		process = subprocess.Popen(
-			[java_bin, "-jar", server.jar_name],
-			cwd=server.path,
+	try:
+		launch_result = launcher.launch_server_detached(
+			server,
+			loop=loop,
+			config=config,
 		)
-		config.mark_server_started(
-			server.tag,
-			pid=process.pid,
-			loop_enabled=loop,
-			docker_container_id=None,
-			docker_container_name=None,
-			docker_memory_limit=None,
-		)
-		config.save()
+	except RuntimeError as exc:
+		raise ServerManagerError(str(exc)) from exc
 
+	if console is not None:
+		console.print(
+			Panel(
+				"\n".join(
+					[
+						t("manager.docker_started"),
+						f"{t('label.server')}: [cyan]{server.name}[/cyan] ([cyan]{server.tag}[/cyan])",
+						f"{t('label.container')}: [cyan]{launch_result.container_name}[/cyan]",
+						f"{t('label.memory_limit')}: [cyan]{launch_result.memory_limit}[/cyan]",
+						f"{t('label.log')}: [dim]{launch_result.log_path}[/dim]",
+					]
+				),
+				title=t("panel.success_title"),
+				border_style="green",
+				expand=False,
+			)
+		)
+
+	if detached:
 		if console is not None:
 			console.print(
-				t(
-					"manager.launching_server",
-					name=server.name,
-					tag=server.tag,
-					pid=process.pid,
+				Panel(
+					" ".join(launch_result.attach_command),
+					title=t("cli.start.detached_attach_title"),
+					border_style="cyan",
+					expand=False,
 				)
 			)
+		return 0
 
-		interrupted = False
-
-		try:
-			last_exit_code = process.wait()
-		except KeyboardInterrupt:
-			interrupted = True
-			last_exit_code = _stop_process(process)
-
-		config.mark_server_stopped(
-			server.tag,
-			exit_code=last_exit_code,
-			preserve_loop=loop and not interrupted,
-		)
-		config.save()
-
-		if interrupted:
-			return 130
-
-		if not loop:
-			return last_exit_code
-
-		if console is not None:
-			console.print(
-				t(
-					"manager.loop_restart",
-					exit_code=last_exit_code,
-					delay=RESTART_DELAY_SECONDS,
-				)
-			)
-
-		time.sleep(RESTART_DELAY_SECONDS)
+	return launcher.follow_container_logs(
+		launch_result.container_name,
+		config=config,
+		server_tag=server.tag,
+	)
 
 
 def format_timedelta(value: timedelta | None) -> str:
@@ -633,7 +612,7 @@ def _ensure_server_can_modify_core(
 ) -> ManagedServer:
 	sync_runtime_states(config)
 	resolved_server = config.get_server_by_tag(server.tag) or server
-	runtime_view = get_runtime_view(config, resolved_server)
+	runtime_view = _build_runtime_view(config, resolved_server)
 
 	if runtime_view.status == "running" or runtime_view.loop_enabled:
 		raise ServerManagerError(
@@ -707,6 +686,31 @@ def _cleanup_stopped_docker_runtime(server: ManagedServer) -> None:
 	container_name = server.runtime.docker_container_name
 	if container_name is not None:
 		remove_docker_container(container_name)
+
+
+def _stop_docker_server_gracefully(
+	container_name: str,
+	*,
+	force: bool,
+	timeout_seconds: float = 20.0,
+) -> None:
+	if force:
+		stop_docker_container(container_name)
+		return
+
+	try:
+		send_docker_command(container_name, "stop")
+	except RuntimeError:
+		stop_docker_container(container_name)
+		return
+
+	deadline = time.monotonic() + timeout_seconds
+	while time.monotonic() < deadline:
+		if not docker_container_is_running(container_name):
+			return
+		time.sleep(0.25)
+
+	stop_docker_container(container_name)
 
 
 def _get_parent_pid(pid: int | None) -> int | None:
@@ -979,7 +983,7 @@ def _resolve_download_target_path(target_directory: Path, file_name: str) -> Pat
 		target_path.relative_to(root)
 	except ValueError as exc:
 		raise ServerManagerError(
-			f"Download target escapes the server directory: {target_path}"
+			t("manager.download_target_escape", target_path=target_path)
 		) from exc
 
 	return target_path
@@ -988,7 +992,9 @@ def _resolve_download_target_path(target_directory: Path, file_name: str) -> Pat
 def _require_safe_download_file_name(file_name: str) -> str:
 	decoded_file_name = unquote(file_name).strip()
 	if not _is_safe_download_file_name(decoded_file_name):
-		raise ServerManagerError(f"Unsafe download filename: {file_name!r}")
+		raise ServerManagerError(
+			t("manager.unsafe_download_filename", file_name=repr(file_name))
+		)
 	return decoded_file_name
 
 
@@ -1012,7 +1018,7 @@ def _validate_download_size(size: int | None) -> None:
 
 	if size > MAX_CORE_DOWNLOAD_BYTES:
 		max_mib = MAX_CORE_DOWNLOAD_BYTES // (1024 * 1024)
-		raise ServerManagerError(f"Core download exceeds the {max_mib} MiB safety limit.")
+		raise ServerManagerError(t("manager.download_too_large", max_mib=max_mib))
 
 
 def _fetch_download_sha256(client: httpx.Client, download_url: str) -> str:
@@ -1027,11 +1033,15 @@ def _fetch_download_sha256(client: httpx.Client, download_url: str) -> str:
 		)
 	except httpx.HTTPStatusError as exc:
 		raise ServerManagerError(
-			f"Missing SHA-256 checksum sidecar for core download: {checksum_url}"
+			t("manager.sha256_missing_sidecar", checksum_url=checksum_url)
 		) from exc
 	except httpx.RequestError as exc:
 		raise ServerManagerError(
-			f"Failed to fetch SHA-256 checksum from {checksum_url}: {format_error(exc)}"
+			t(
+				"manager.sha256_fetch_error",
+				checksum_url=checksum_url,
+				error=format_error(exc),
+			)
 		) from exc
 
 	return _parse_sha256_checksum(response.text, checksum_url)
@@ -1040,7 +1050,7 @@ def _fetch_download_sha256(client: httpx.Client, download_url: str) -> str:
 def _parse_sha256_checksum(payload: str, source: str = "checksum response") -> str:
 	match = SHA256_HEX_RE.search(payload)
 	if match is None:
-		raise ServerManagerError(f"No SHA-256 checksum found in {source}.")
+		raise ServerManagerError(t("manager.sha256_not_found", source=source))
 	return match.group(0).lower()
 
 
@@ -1081,14 +1091,3 @@ def _get_uptime(server: ManagedServer) -> timedelta | None:
 	return utc_now() - server.runtime.last_started_at
 
 
-def _stop_process(process: subprocess.Popen[bytes]) -> int:
-	if process.poll() is not None:
-		return process.returncode or 0
-
-	process.terminate()
-
-	try:
-		return process.wait(timeout=10)
-	except subprocess.TimeoutExpired:
-		process.kill()
-		return process.wait()

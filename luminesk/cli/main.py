@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 
-from luminesk.core import doctor as dr
+from luminesk.core import diagnostic as dg
 from luminesk.core import manager as srv
 from luminesk.core.config import UserConfig
 from luminesk.core.messages import set_language, t
@@ -32,6 +32,7 @@ CoreOption = Annotated[str | None, Parameter(name=["--core", "-c"], help=t("cli.
 TagOption = Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.create.option.tag"))]
 ForceOption = Annotated[bool, Parameter(name=["--force", "-f"], help=t("cli.create.option.force"))]
 MemoryOption = Annotated[str, Parameter(name=["--memory", "-m"], help=t("cli.create.option.memory"))]
+StartTagArgument = Annotated[str | None, Parameter(help=t("cli.start.argument.tag"))]
 
 app = App(
 	name="luminesk",
@@ -44,7 +45,11 @@ console = Console()
 
 
 def _load_cli_config() -> UserConfig:
-	config = UserConfig.load()
+	try:
+		config = UserConfig.load()
+	except Exception as exc:
+		console.print(error_panel(t("cli.config.load_failed", error=exc)))
+		raise SystemExit(1) from exc
 	set_language(config.language)
 	return config
 
@@ -53,12 +58,12 @@ def _status_label(status: bool) -> str:
 	return f"[green]{t('common.ok')}[/]" if status else f"[red]{t('common.fail')}[/]"
 
 
-@app.command
-def doctor() -> None:
-	"""Run system diagnostics for Nukkit-compatible cores."""
+@app.command(name="diagnostic", alias="check")
+def diagnostic() -> None:
+	"""Check Nukkit-compatible core repositories."""
 	_load_cli_config()
 	label = AnimatedGradientText(
-		t("cli.doctor.checking_requirements"),
+		t("cli.diagnostic.checking_sources"),
 		palette=(
 			(80, 80, 80),
 			(120, 120, 120),
@@ -71,22 +76,9 @@ def doctor() -> None:
 	results = []
 
 	with Live(label, refresh_per_second=15, transient=True) as live:
-		label.set_text(t("cli.doctor.checking_java"))
+		label.set_text(t("cli.diagnostic.checking_sources"))
 		live.update(label)
-		results.append(dr.check_java())
-
-		label.set_text(t("cli.doctor.checking_docker"))
-		live.update(label)
-		results.append(dr.check_docker())
-
-		label.set_text(t("cli.doctor.checking_sources"))
-		live.update(label)
-
-		repos = dr.check_download_sources()
-		if isinstance(repos, list):
-			results.extend(repos)
-		else:
-			results.append(repos)
+		results.extend(dg.check_repositories())
 
 	table = Table()
 	table.add_column(t("label.component"), style="cyan", no_wrap=True)
@@ -98,11 +90,11 @@ def doctor() -> None:
 
 	console.print(table)
 
-	if any(res.critical and not res.status for res in results):
-		console.print(error_panel(t("cli.doctor.critical_error")))
+	if any(not res.status for res in results):
+		console.print(error_panel(t("cli.diagnostic.failure")))
 		raise SystemExit(1)
 
-	console.print(success_panel(t("cli.doctor.success")))
+	console.print(success_panel(t("cli.diagnostic.success")))
 
 
 @app.command
@@ -177,7 +169,7 @@ def create(
 			console=console,
 			memory_limit=memory_limit,
 		)
-	except (srv.ServerManagerError, ValueError) as exc:
+	except (srv.ServerManagerError, RuntimeError, ValueError) as exc:
 		console.print(error_panel(str(exc)))
 		raise SystemExit(1) from exc
 
@@ -201,16 +193,30 @@ def create(
 
 @app.command
 def start(
+	tag: StartTagArgument = None,
+	/,
 	*,
 	loop: Annotated[bool, Parameter(name=["--loop", "-l"], help=t("cli.start.option.loop"))] = False,
-	tag: Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.start.option.tag"))] = None,
+	detached: Annotated[
+		bool,
+		Parameter(
+			name=["--detached", "--deatached", "-d"],
+			help=t("cli.start.option.detached"),
+		),
+	] = False,
 ) -> None:
 	"""Start a server."""
 	config = _load_cli_config()
 
 	try:
 		server = srv.resolve_server(config=config, tag=tag, directory=Path.cwd())
-		exit_code = srv.run_server(config=config, server=server, loop=loop, console=console)
+		exit_code = srv.run_server(
+			config=config,
+			server=server,
+			loop=loop,
+			detached=detached,
+			console=console,
+		)
 	except srv.ServerManagerError as exc:
 		console.print(error_panel(str(exc)))
 		raise SystemExit(1) from exc
@@ -218,7 +224,7 @@ def start(
 	raise SystemExit(exit_code)
 
 
-@app.command(name="upgrade_core")
+@app.command(name="upgrade-core", alias="upgrade_core")
 def upgrade_core(
 	*,
 	tag: Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.upgrade.option.tag"))] = None,
@@ -248,7 +254,7 @@ def upgrade_core(
 	)
 
 
-@app.command(name="change_core")
+@app.command(name="change-core", alias="change_core")
 def change_core(
 	*,
 	tag: Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.change.option.tag"))] = None,

@@ -15,6 +15,7 @@ from luminesk.utils.docker import (
 	build_docker_logs_command,
 	build_docker_run_command,
 	docker_container_is_running,
+	get_docker_container_exit_code,
 	get_docker_binary,
 	get_docker_container_pid,
 	normalize_memory_limit,
@@ -38,10 +39,6 @@ class DetachedLaunchResult:
 	log_path: Path
 	memory_limit: str
 
-	@property
-	def session_name(self) -> str:
-		return self.container_name
-
 
 def build_log_path(server: ServerLaunchTarget, now: datetime | None = None) -> Path:
 	timestamp = (now or datetime.now().astimezone()).strftime("%Y%m%d-%H%M%S")
@@ -57,6 +54,7 @@ def launch_server_detached(
 	config: UserConfig | None = None,
 ) -> DetachedLaunchResult:
 	docker_bin = get_docker_binary()
+	ensure_docker_image(image, docker_bin=docker_bin)
 	normalized_memory_limit = normalize_memory_limit(memory_limit or server.memory_limit)
 	log_path = build_log_path(server)
 	log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,3 +124,60 @@ def launch_server_detached(
 		log_path=log_path,
 		memory_limit=normalized_memory_limit,
 	)
+
+
+def follow_container_logs(
+	container_name: str,
+	*,
+	config: UserConfig,
+	server_tag: str,
+) -> int:
+	docker_bin = get_docker_binary()
+	process = subprocess.Popen([docker_bin, "logs", "--follow", container_name])
+
+	try:
+		logs_exit_code = process.wait()
+	except KeyboardInterrupt:
+		process.terminate()
+		try:
+			process.wait(timeout=3)
+		except subprocess.TimeoutExpired:
+			process.kill()
+		return 130
+
+	if docker_container_is_running(container_name):
+		return logs_exit_code
+
+	exit_code = get_docker_container_exit_code(container_name)
+	remove_docker_container(container_name)
+	config.mark_server_stopped(server_tag, exit_code=exit_code)
+	config.save()
+	return exit_code if exit_code is not None else logs_exit_code
+
+
+def ensure_docker_image(image: str, *, docker_bin: str | None = None) -> None:
+	resolved_docker_bin = docker_bin or get_docker_binary()
+	inspect_result = subprocess.run(
+		[resolved_docker_bin, "image", "inspect", image],
+		check=False,
+		stdout=subprocess.DEVNULL,
+		stderr=subprocess.PIPE,
+		text=True,
+		encoding="utf-8",
+		errors="replace",
+	)
+	if inspect_result.returncode == 0:
+		return
+
+	pull_result = subprocess.run(
+		[resolved_docker_bin, "pull", image],
+		check=False,
+		stdout=subprocess.PIPE,
+		stderr=subprocess.PIPE,
+		text=True,
+		encoding="utf-8",
+		errors="replace",
+	)
+	if pull_result.returncode != 0:
+		error = pull_result.stderr.strip() or pull_result.stdout.strip()
+		raise RuntimeError(t("launcher.docker_pull_failed", image=image, error=error))
