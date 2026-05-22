@@ -17,7 +17,12 @@ from luminesk.core.config import UserConfig
 from luminesk.core.messages import set_language, t
 from luminesk.core.registry import registry
 from luminesk.main import __version__
-from luminesk.utils.docker import DEFAULT_DOCKER_MEMORY_LIMIT, normalize_memory_limit
+from luminesk.utils.docker import (
+	DEFAULT_DOCKER_MEMORY_LIMIT,
+	DEFAULT_JAVA_VERSION,
+	normalize_java_image,
+	normalize_memory_limit,
+)
 from luminesk.utils.rich_utils import (
 	AnimatedGradientText,
 	error_panel,
@@ -32,6 +37,7 @@ CoreOption = Annotated[str | None, Parameter(name=["--core", "-c"], help=t("cli.
 TagOption = Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.create.option.tag"))]
 ForceOption = Annotated[bool, Parameter(name=["--force", "-f"], help=t("cli.create.option.force"))]
 MemoryOption = Annotated[str, Parameter(name=["--memory", "-m"], help=t("cli.create.option.memory"))]
+JavaOption = Annotated[str | None, Parameter(name=["--java", "-j"], help=t("cli.create.option.java"))]
 StartTagArgument = Annotated[str | None, Parameter(help=t("cli.start.argument.tag"))]
 
 app = App(
@@ -127,9 +133,11 @@ def create(
 	tag: TagOption = None,
 	force: ForceOption = False,
 	memory: MemoryOption = DEFAULT_DOCKER_MEMORY_LIMIT,
+	java: JavaOption = None,
 ) -> None:
 	"""Create a new server."""
 	config = _load_cli_config()
+	wizard_mode = any(value is None for value in (name, directory, core, tag))
 
 	if core is None:
 		core = Prompt.ask(t("cli.create.prompt.core"), default="nukkit")
@@ -146,7 +154,7 @@ def create(
 		)
 
 	if tag is None:
-		tag = Prompt.ask(t("cli.create.prompt.tag"), default=name.lower().replace(" ", "_"))
+		tag = Prompt.ask(t("cli.create.prompt.tag"), default=name.lower().replace(" ", "-"))
 
 	if directory is None:
 		default_directory = (config.default_server_path / tag).expanduser()
@@ -157,8 +165,16 @@ def create(
 			)
 		)
 
+	if java is None:
+		java = (
+			Prompt.ask(t("cli.create.prompt.java"), default=DEFAULT_JAVA_VERSION)
+			if wizard_mode
+			else DEFAULT_JAVA_VERSION
+		)
+
 	try:
 		memory_limit = normalize_memory_limit(memory)
+		java_image = normalize_java_image(java)
 		server = srv.create_server(
 			config=config,
 			name=name,
@@ -168,6 +184,7 @@ def create(
 			force=force,
 			console=console,
 			memory_limit=memory_limit,
+			java_image=java_image,
 		)
 	except (srv.ServerManagerError, RuntimeError, ValueError) as exc:
 		console.print(error_panel(str(exc)))
@@ -183,6 +200,7 @@ def create(
 					f"{t('label.core')}: [cyan]{selected_core.name}[/cyan]",
 					f"{t('label.core_version')}: [cyan]{server.core_version or t('common.unknown')}[/cyan]",
 					f"{t('label.jar')}: [cyan]{server.jar_name}[/cyan]",
+					f"{t('label.java')}: [cyan]{server.java_image}[/cyan]",
 					f"{t('label.memory_limit')}: [cyan]{server.memory_limit}[/cyan]",
 					f"{t('label.path')}: [dim]{server.path}[/dim]",
 				]
@@ -299,6 +317,42 @@ def change_core(
 	)
 
 
+@app.command(name="change-java", alias="change_java")
+def change_java(
+	*,
+	tag: Annotated[str | None, Parameter(name=["--tag", "-t"], help=t("cli.change_java.option.tag"))] = None,
+	java: Annotated[str | None, Parameter(name=["--java", "-j"], help=t("cli.change_java.option.java"))] = None,
+) -> None:
+	"""Change the server Java Docker image."""
+	config = _load_cli_config()
+
+	if java is None:
+		java = Prompt.ask(t("cli.change_java.prompt.java"), default=DEFAULT_JAVA_VERSION)
+
+	try:
+		server = srv.resolve_server(config=config, tag=tag, directory=Path.cwd())
+		updated_server = srv.change_server_java(
+			config=config,
+			server=server,
+			java=java,
+		)
+	except srv.ServerManagerError as exc:
+		console.print(error_panel(str(exc)))
+		raise SystemExit(1) from exc
+
+	console.print(
+		success_panel(
+			"\n".join(
+				[
+					t("cli.change_java.success_title"),
+					f"{t('label.server')}: [cyan]{updated_server.name}[/cyan] ([cyan]{updated_server.tag}[/cyan])",
+					f"{t('label.java')}: [cyan]{updated_server.java_image}[/cyan]",
+				]
+			)
+		)
+	)
+
+
 @app.command
 def stop(
 	target: Annotated[str, Parameter(help=t("cli.stop.argument.target"))],
@@ -385,6 +439,7 @@ def list_servers(
 	table.add_column(t("label.tag"), style="cyan", no_wrap=True)
 	table.add_column(t("label.name"), style="bold")
 	table.add_column(t("label.core"), no_wrap=True)
+	table.add_column(t("label.java"), no_wrap=True)
 	table.add_column(t("label.status"), no_wrap=True)
 	table.add_column(t("label.pid"), no_wrap=True, justify="right")
 	table.add_column(t("label.uptime"), no_wrap=True)
@@ -397,6 +452,7 @@ def list_servers(
 			view.server.tag,
 			view.server.name,
 			view.server.core_id,
+			view.server.java_image,
 			_format_status(view.status, view.loop_enabled, view.docker_container_name),
 			str(view.pid or t("common.empty")),
 			srv.format_timedelta(view.uptime),

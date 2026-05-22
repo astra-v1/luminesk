@@ -171,6 +171,37 @@ def test_delete_server_requires_stopped_server(monkeypatch, tmp_path: Path) -> N
 	assert config.get_server_by_tag("test") is not None
 
 
+def test_change_server_java_requires_stopped_server(monkeypatch, tmp_path: Path) -> None:
+	config = _running_docker_config(tmp_path)
+
+	monkeypatch.setattr(manager.UserConfig, "save", lambda self: None)
+	monkeypatch.setattr(manager, "docker_container_is_running", lambda _: True)
+	monkeypatch.setattr(manager, "get_docker_container_pid", lambda _: 1234)
+
+	with pytest.raises(ServerManagerError, match="must be stopped"):
+		manager.change_server_java(
+			config=config,
+			server=config.get_server_by_tag("test"),
+			java="17",
+		)
+
+
+def test_change_server_java_updates_image(monkeypatch, tmp_path: Path) -> None:
+	server = ManagedServer(
+		name="Test",
+		tag="test",
+		path=tmp_path,
+		core_id="nukkit",
+		jar_name="server.jar",
+	)
+	config = UserConfig(servers={server.tag: server})
+	monkeypatch.setattr(manager.UserConfig, "save", lambda self: None)
+
+	updated = manager.change_server_java(config=config, server=server, java="17")
+
+	assert updated.java_image == "eclipse-temurin:17-jre"
+
+
 def _running_docker_config(tmp_path: Path) -> UserConfig:
 	server = ManagedServer(
 		name="Test",

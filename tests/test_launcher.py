@@ -17,10 +17,13 @@ def test_launch_server_detached_marks_docker_runtime(
 		path=tmp_path,
 		core_id="nukkit",
 		jar_name="server.jar",
+		java_image="17",
 	)
 	config = UserConfig(servers={server.tag: server}, db_path=tmp_path / "state.sqlite3")
+	calls: list[list[str]] = []
 
 	def fake_run(args, **kwargs):
+		calls.append(args)
 		return subprocess.CompletedProcess(args=args, returncode=0, stdout="container-id\n")
 
 	monkeypatch.setattr(launcher, "get_docker_binary", lambda: "docker")
@@ -40,6 +43,8 @@ def test_launch_server_detached_marks_docker_runtime(
 	assert result.container_id == "container-id"
 	assert result.container_name == "luminesk-test"
 	assert result.memory_limit == "768m"
+	assert result.java_image == "eclipse-temurin:17-jre"
+	assert "eclipse-temurin:17-jre" in calls[-1]
 	assert updated_server.memory_limit == "768m"
 	assert updated_server.runtime.pid == 1234
 	assert updated_server.runtime.docker_container_id == "container-id"

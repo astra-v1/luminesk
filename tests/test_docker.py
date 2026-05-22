@@ -6,6 +6,7 @@ from luminesk.utils.docker import (
 	DOCKER_SERVER_DIR,
 	build_docker_container_name,
 	build_docker_run_command,
+	normalize_java_image,
 	normalize_memory_limit,
 )
 
@@ -29,12 +30,23 @@ def test_normalize_memory_limit() -> None:
 			normalize_memory_limit(value)
 
 
+def test_normalize_java_image() -> None:
+	assert normalize_java_image(None) == "eclipse-temurin:21-jre"
+	assert normalize_java_image("17") == "eclipse-temurin:17-jre"
+	assert normalize_java_image("ghcr.io/example/java:21") == "ghcr.io/example/java:21"
+
+	for value in ("", "0", "java 21"):
+		with pytest.raises(ValueError):
+			normalize_java_image(value)
+
+
 def test_build_docker_run_command_uses_memory_and_mount(monkeypatch) -> None:
 	monkeypatch.setattr("luminesk.utils.docker.platform.system", lambda: "Linux")
 
 	command = build_docker_run_command(
 		LaunchTarget(),
 		Path("/srv/my server/.luminesk/logs/my-server.log"),
+		image="eclipse-temurin:17-jre",
 		memory_limit="2g",
 		loop=True,
 	)
@@ -48,6 +60,7 @@ def test_build_docker_run_command_uses_memory_and_mount(monkeypatch) -> None:
 	mount_source = str(LaunchTarget.path.expanduser().resolve()).replace("\\", "/")
 	assert command[command.index("--volume") + 1] == f"{mount_source}:{DOCKER_SERVER_DIR}"
 	assert "LUMINESK_LOOP=1" in command
+	assert "eclipse-temurin:17-jre" in command
 
 
 def test_build_docker_run_command_publishes_default_ports_off_linux(monkeypatch) -> None:

@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,18 @@ def test_managed_server_normalizes_memory_limit(tmp_path: Path) -> None:
 		memory_limit=" 2G ",
 	)
 	assert server.memory_limit == "2g"
+
+
+def test_managed_server_normalizes_java_image(tmp_path: Path) -> None:
+	server = config.ManagedServer(
+		name="Test",
+		tag="test",
+		path=tmp_path,
+		core_id="nukkit",
+		jar_name="server.jar",
+		java_image="17",
+	)
+	assert server.java_image == "eclipse-temurin:17-jre"
 
 
 def test_get_server_by_directory_prefers_deepest_match(tmp_path: Path) -> None:
@@ -108,8 +121,100 @@ def test_save_writes_sqlite_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 	monkeypatch.setattr(config, "CONFIG_DIR", config_dir)
 	monkeypatch.setattr(config, "CONFIG_DB_FILE", config_db_file)
 
-	user_config = config.UserConfig(db_path=config_db_file)
+	server = config.ManagedServer(
+		name="Test",
+		tag="test",
+		path=tmp_path / "server",
+		core_id="nukkit",
+		jar_name="server.jar",
+		java_image="17",
+	)
+	user_config = config.UserConfig(servers={server.tag: server}, db_path=config_db_file)
 	user_config.save()
 
 	assert config_db_file.is_file()
-	assert config.UserConfig.load().language == config.DEFAULT_LANGUAGE
+	loaded_config = config.UserConfig.load()
+	assert loaded_config.language == config.DEFAULT_LANGUAGE
+	assert loaded_config.get_server_by_tag("test").java_image == "eclipse-temurin:17-jre"
+
+
+def test_initialize_database_adds_java_image_to_existing_servers(tmp_path: Path) -> None:
+	db_path = tmp_path / "state.sqlite3"
+	conn = sqlite3.connect(db_path)
+	conn.row_factory = sqlite3.Row
+	try:
+		conn.execute(
+			"""
+			CREATE TABLE servers (
+				tag TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				path TEXT NOT NULL,
+				core_id TEXT NOT NULL,
+				core_version TEXT,
+				jar_name TEXT NOT NULL,
+				memory_limit TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				status TEXT NOT NULL,
+				pid INTEGER,
+				loop_enabled INTEGER NOT NULL,
+				docker_container_id TEXT,
+				docker_container_name TEXT,
+				docker_memory_limit TEXT,
+				last_started_at TEXT,
+				last_stopped_at TEXT,
+				last_exit_code INTEGER
+			)
+			"""
+		)
+		conn.execute(
+			"""
+			INSERT INTO servers(
+				tag,
+				name,
+				path,
+				core_id,
+				core_version,
+				jar_name,
+				memory_limit,
+				created_at,
+				status,
+				pid,
+				loop_enabled,
+				docker_container_id,
+				docker_container_name,
+				docker_memory_limit,
+				last_started_at,
+				last_stopped_at,
+				last_exit_code
+			)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			""",
+			(
+				"legacy",
+				"Legacy",
+				str(tmp_path / "legacy"),
+				"nukkit",
+				None,
+				"server.jar",
+				"1g",
+				config.utc_now().isoformat(),
+				"stopped",
+				None,
+				0,
+				None,
+				None,
+				None,
+				None,
+				None,
+				None,
+			),
+		)
+
+		config._initialize_database(conn)
+		loaded_config = config._load_config_from_database(conn)
+	finally:
+		conn.close()
+
+	legacy_server = loaded_config.get_server_by_tag("legacy")
+	assert legacy_server is not None
+	assert legacy_server.java_image == "eclipse-temurin:21-jre"

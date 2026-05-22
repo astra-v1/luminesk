@@ -11,12 +11,14 @@ from typing import Protocol
 from luminesk.core.messages import t
 
 
-DEFAULT_DOCKER_IMAGE = "eclipse-temurin:21-jre"
+DEFAULT_JAVA_VERSION = "21"
+DEFAULT_DOCKER_IMAGE = f"eclipse-temurin:{DEFAULT_JAVA_VERSION}-jre"
 DEFAULT_DOCKER_MEMORY_LIMIT = "1g"
 DOCKER_SERVER_DIR = "/server"
 DOCKER_CONSOLE_PIPE = "/tmp/luminesk-console.pipe"
 
 MEMORY_LIMIT_RE = re.compile(r"^[1-9][0-9]*(?:[bkmg])?$", re.IGNORECASE)
+JAVA_VERSION_RE = re.compile(r"^[1-9][0-9]*$")
 
 DOCKER_ENTRYPOINT_SCRIPT = f"""
 set -o pipefail
@@ -57,6 +59,23 @@ def normalize_memory_limit(memory_limit: str | None) -> str:
 				memory_limit=memory_limit or "",
 			)
 		)
+	return normalized
+
+
+def normalize_java_image(java: str | None) -> str:
+	normalized = DEFAULT_JAVA_VERSION if java is None else java.strip()
+	if not normalized:
+		raise ValueError(t("docker.invalid_java_image", java=java or ""))
+
+	if normalized.isdecimal() and not JAVA_VERSION_RE.fullmatch(normalized):
+		raise ValueError(t("docker.invalid_java_image", java=java or ""))
+
+	if JAVA_VERSION_RE.fullmatch(normalized):
+		return f"eclipse-temurin:{normalized}-jre"
+
+	if any(char.isspace() for char in normalized):
+		raise ValueError(t("docker.invalid_java_image", java=java or ""))
+
 	return normalized
 
 

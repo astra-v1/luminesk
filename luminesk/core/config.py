@@ -13,7 +13,12 @@ from platformdirs import user_cache_dir, user_config_dir
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from luminesk.core.messages import DEFAULT_LANGUAGE, normalize_language, t
-from luminesk.utils.docker import DEFAULT_DOCKER_MEMORY_LIMIT, normalize_memory_limit
+from luminesk.utils.docker import (
+	DEFAULT_DOCKER_IMAGE,
+	DEFAULT_DOCKER_MEMORY_LIMIT,
+	normalize_java_image,
+	normalize_memory_limit,
+)
 
 
 CONFIG_DIR = Path(user_config_dir("luminesk"))
@@ -52,6 +57,7 @@ class ManagedServer(BaseModel):
 	core_id: str
 	core_version: str | None = None
 	jar_name: str
+	java_image: str = DEFAULT_DOCKER_IMAGE
 	memory_limit: str = DEFAULT_DOCKER_MEMORY_LIMIT
 	created_at: datetime = Field(default_factory=utc_now)
 	runtime: ServerRuntime = Field(default_factory=ServerRuntime)
@@ -81,6 +87,11 @@ class ManagedServer(BaseModel):
 	@classmethod
 	def normalize_server_memory_limit(cls, value: str | None) -> str:
 		return normalize_memory_limit(value)
+
+	@field_validator("java_image", mode="before")
+	@classmethod
+	def normalize_server_java_image(cls, value: str | None) -> str:
+		return normalize_java_image(value)
 
 	@property
 	def jar_path(self) -> Path:
@@ -257,6 +268,7 @@ def _initialize_database(conn: sqlite3.Connection) -> None:
 			core_id TEXT NOT NULL,
 			core_version TEXT,
 			jar_name TEXT NOT NULL,
+			java_image TEXT NOT NULL DEFAULT 'eclipse-temurin:21-jre',
 			memory_limit TEXT NOT NULL,
 			created_at TEXT NOT NULL,
 			status TEXT NOT NULL,
@@ -271,7 +283,27 @@ def _initialize_database(conn: sqlite3.Connection) -> None:
 		)
 		"""
 	)
+	_ensure_column(
+		conn,
+		"servers",
+		"java_image",
+		"TEXT NOT NULL DEFAULT 'eclipse-temurin:21-jre'",
+	)
 	conn.execute("CREATE INDEX IF NOT EXISTS idx_servers_path ON servers(path)")
+
+
+def _ensure_column(
+	conn: sqlite3.Connection,
+	table_name: str,
+	column_name: str,
+	definition: str,
+) -> None:
+	columns = {
+		row["name"]
+		for row in conn.execute(f"PRAGMA table_info({table_name})")
+	}
+	if column_name not in columns:
+		conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 @contextmanager
@@ -352,6 +384,7 @@ def _upsert_server(conn: sqlite3.Connection, server: ManagedServer) -> None:
 			core_id = excluded.core_id,
 			core_version = excluded.core_version,
 			jar_name = excluded.jar_name,
+			java_image = excluded.java_image,
 			memory_limit = excluded.memory_limit,
 			created_at = excluded.created_at,
 			status = excluded.status,
@@ -377,6 +410,7 @@ def _insert_server_sql() -> str:
 			core_id,
 			core_version,
 			jar_name,
+			java_image,
 			memory_limit,
 			created_at,
 			status,
@@ -396,6 +430,7 @@ def _insert_server_sql() -> str:
 			:core_id,
 			:core_version,
 			:jar_name,
+			:java_image,
 			:memory_limit,
 			:created_at,
 			:status,
@@ -421,6 +456,7 @@ def _server_to_row(server: ManagedServer) -> dict[str, object]:
 		"core_id": payload["core_id"],
 		"core_version": payload["core_version"],
 		"jar_name": payload["jar_name"],
+		"java_image": payload["java_image"],
 		"memory_limit": payload["memory_limit"],
 		"created_at": payload["created_at"],
 		"status": runtime["status"],
@@ -444,6 +480,7 @@ def _server_from_row(row: sqlite3.Row) -> ManagedServer:
 			"core_id": row["core_id"],
 			"core_version": row["core_version"],
 			"jar_name": row["jar_name"],
+			"java_image": row["java_image"],
 			"memory_limit": row["memory_limit"],
 			"created_at": row["created_at"],
 			"runtime": {

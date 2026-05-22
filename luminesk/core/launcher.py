@@ -28,6 +28,7 @@ class ServerLaunchTarget(Protocol):
 	path: Path
 	jar_name: str
 	memory_limit: str
+	java_image: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -38,6 +39,7 @@ class DetachedLaunchResult:
 	attach_command: tuple[str, ...]
 	log_path: Path
 	memory_limit: str
+	java_image: str
 
 
 def build_log_path(server: ServerLaunchTarget, now: datetime | None = None) -> Path:
@@ -50,11 +52,12 @@ def launch_server_detached(
 	loop: bool = False,
 	*,
 	memory_limit: str | None = None,
-	image: str = DEFAULT_DOCKER_IMAGE,
+	image: str | None = None,
 	config: UserConfig | None = None,
 ) -> DetachedLaunchResult:
 	docker_bin = get_docker_binary()
-	ensure_docker_image(image, docker_bin=docker_bin)
+	resolved_image = image or getattr(server, "java_image", DEFAULT_DOCKER_IMAGE)
+	ensure_docker_image(resolved_image, docker_bin=docker_bin)
 	normalized_memory_limit = normalize_memory_limit(memory_limit or server.memory_limit)
 	log_path = build_log_path(server)
 	log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +71,7 @@ def launch_server_detached(
 		server,
 		log_path,
 		container_name=container_name,
-		image=image,
+		image=resolved_image,
 		loop=loop,
 		memory_limit=normalized_memory_limit,
 	)
@@ -123,6 +126,7 @@ def launch_server_detached(
 		attach_command=attach_command,
 		log_path=log_path,
 		memory_limit=normalized_memory_limit,
+		java_image=resolved_image,
 	)
 
 

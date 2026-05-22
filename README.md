@@ -46,7 +46,7 @@ Supported engines: [Nukkit](https://github.com/CloudburstMC/Nukkit), [PowerNukki
 | Component | Version                        | Required |
 |----------|--------------------------------|----------|
 | Python   | **3.13+** (3.14 recommended)   | Not required if you don't install via pip |
-| Java     | 21+                            | Provided by the Docker runtime image |
+| Java     | 21 by default                  | Provided by the selected Docker runtime image |
 | Docker   | latest                         | Required for running servers |
 
 ---
@@ -147,21 +147,21 @@ nesk diagnostic
 Create a server:
 
 ```bash
-nesk create -n "My Server" -d ./servers/my -c nukkit -t my_server
+nesk create -n "My Server" -d ./servers/my -c nukkit -t my-server
 # Parameters are optional - Wizard Setup will start if omitted
 ```
 
 Start a server:
 
 ```bash
-nesk start my_server
+nesk start my-server
 # or run inside the server directory
 ```
 
 Stop a server:
 
 ```bash
-nesk stop my_server
+nesk stop my-server
 ```
 
 List servers:
@@ -174,24 +174,32 @@ nesk list
 
 # Runtime
 
-LumiNESK starts servers through **[Docker](https://www.docker.com/)**. Containers use the `eclipse-temurin:21-jre` image by default, mount the server directory into `/server`, use host networking on Linux and publish the default Bedrock port on Docker Desktop, and apply the server memory limit with Docker `--memory`.
+LumiNESK starts servers through **[Docker](https://www.docker.com/)**. Containers use `eclipse-temurin:21-jre` by default, mount the server directory into `/server`, use host networking on Linux and publish the default Bedrock port on Docker Desktop, and apply the server memory limit with Docker `--memory`.
 
-Create a server with a custom background memory limit:
+Create a server with a custom background memory limit and Java runtime:
 
 ```bash
-nesk create -n "My Server" -d ./servers/my -c nukkit -t my_server --memory 2g
+nesk create -n "My Server" -d ./servers/my -c nukkit -t my-server --memory 2g --java 21
+```
+
+`--java` accepts either a numeric version, such as `17` or `21`, or a full Docker image name, such as `eclipse-temurin:21-jre`.
+
+Change Java for a stopped server:
+
+```bash
+nesk change-java --tag my-server --java eclipse-temurin:17-jre
 ```
 
 Start and attach to logs immediately:
 
 ```bash
-nesk start my_server
+nesk start my-server
 ```
 
 Start in the background:
 
 ```bash
-nesk start my_server --detached
+nesk start my-server --detached
 ```
 
 Follow container logs manually:

@@ -44,6 +44,7 @@ from luminesk.utils.docker import (
 	remove_docker_container,
 	stop_docker_container,
 	kill_docker_container,
+	normalize_java_image,
 	send_docker_command,
 )
 
@@ -117,6 +118,7 @@ def create_server(
 	force: bool = False,
 	console: Console | None = None,
 	memory_limit: str | None = None,
+	java_image: str | None = None,
 ) -> ManagedServer:
 	normalized_directory = directory.expanduser().resolve()
 	_ensure_registration_target_available(config, tag, normalized_directory)
@@ -132,6 +134,7 @@ def create_server(
 		core_id=core.id,
 		core_version=downloaded_core.version,
 		jar_name=downloaded_core.jar_path.name,
+		java_image=java_image,
 		memory_limit=memory_limit,
 	)
 	config.register_server(server)
@@ -497,6 +500,21 @@ def change_server_core(
 	return resolved_server
 
 
+def change_server_java(
+	config: UserConfig,
+	server: ManagedServer,
+	java: str,
+) -> ManagedServer:
+	resolved_server = _ensure_server_can_modify_java(config, server)
+	try:
+		resolved_server.java_image = normalize_java_image(java)
+	except ValueError as exc:
+		raise ServerManagerError(str(exc)) from exc
+
+	config.save()
+	return resolved_server
+
+
 def delete_server(config: UserConfig, target: str) -> ManagedServer:
 	resolved_server = resolve_server(config=config, tag=target, directory=None)
 	runtime_view = get_runtime_view(config, resolved_server)
@@ -548,6 +566,7 @@ def run_server(
 						t("manager.docker_started"),
 						f"{t('label.server')}: [cyan]{server.name}[/cyan] ([cyan]{server.tag}[/cyan])",
 						f"{t('label.container')}: [cyan]{launch_result.container_name}[/cyan]",
+						f"{t('label.java')}: [cyan]{launch_result.java_image}[/cyan]",
 						f"{t('label.memory_limit')}: [cyan]{launch_result.memory_limit}[/cyan]",
 						f"{t('label.log')}: [dim]{launch_result.log_path}[/dim]",
 					]
@@ -618,6 +637,25 @@ def _ensure_server_can_modify_core(
 		raise ServerManagerError(
 			t(
 				"manager.server_must_be_stopped_for_core_change",
+				tag=resolved_server.tag,
+			)
+		)
+
+	return resolved_server
+
+
+def _ensure_server_can_modify_java(
+	config: UserConfig,
+	server: ManagedServer,
+) -> ManagedServer:
+	sync_runtime_states(config)
+	resolved_server = config.get_server_by_tag(server.tag) or server
+	runtime_view = _build_runtime_view(config, resolved_server)
+
+	if runtime_view.status == "running" or runtime_view.loop_enabled:
+		raise ServerManagerError(
+			t(
+				"manager.server_must_be_stopped_for_java_change",
 				tag=resolved_server.tag,
 			)
 		)
