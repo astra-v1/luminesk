@@ -43,16 +43,13 @@ keywords = [
 ]
 
 [project.optional-dependencies]
-dev = [
-	"pytest>=9.0.3",
-	"pytest-cov>=5.0.0",
-]
+dev = ["pytest>=9.0.3", "pytest-cov>=5.0.0"]
 build = ["nuitka>=2.8.9"]
 
 [project.urls]
-Homepage = "https://github.com/astra-v1/LumiNESK"
-Repository = "https://github.com/astra-v1/LumiNESK.git"
-Issues = "https://github.com/astra-v1/LumiNESK/issues"
+Homepage = "https://github.com/task-v1/LumiNESK"
+Repository = "https://github.com/task-v1/LumiNESK.git"
+Issues = "https://github.com/task-v1/LumiNESK/issues"
 
 [project.scripts]
 luminesk = "luminesk.main:main"

@@ -1,13 +1,13 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/astra-v1/LumiNESK/main/assets/luminesk.png" width="420" alt="LumiNESK logo">
+<img src="https://raw.githubusercontent.com/task-v1/LumiNESK/main/assets/luminesk.png" width="420" alt="LumiNESK logo">
 
 # LumiNESK
 ### Nukkit Engine Servers Kit
 
 CLI manager for Minecraft servers based on **Nukkit-family** engines
 
-[![PyPI - Version](https://img.shields.io/pypi/v/luminesk?style=for-the-badge)](https://pypi.org/project/luminesk/) [![GitHub Release](https://img.shields.io/github/v/release/astra-v1/LumiNESK?style=for-the-badge)](https://github.com/astra-v1/LumiNESK/releases/latest) [![Tests](https://img.shields.io/github/actions/workflow/status/astra-v1/LumiNESK/ci.yml?style=for-the-badge)](https://github.com/astra-v1/LumiNESK/actions)
+[![PyPI - Version](https://img.shields.io/pypi/v/luminesk?style=for-the-badge)](https://pypi.org/project/luminesk/) [![GitHub Release](https://img.shields.io/github/v/release/task-v1/LumiNESK?style=for-the-badge)](https://github.com/task-v1/LumiNESK/releases/latest) [![Tests](https://img.shields.io/github/actions/workflow/status/task-v1/LumiNESK/ci.yml?style=for-the-badge)](https://github.com/task-v1/LumiNESK/actions)
 
 </div>
 
@@ -71,10 +71,10 @@ pipx install luminesk
 
 ## Download prebuilt binaries
 
-Prebuilt binaries are available in the [releases](https://github.com/astra-v1/LumiNESK/releases) section.
-For Windows: [luminesk-windows-amd64.exe](https://github.com/astra-v1/LumiNESK/releases/latest/download/luminesk-windows-amd64.exe)
-For Linux: [luminesk-linux-amd64](https://github.com/astra-v1/LumiNESK/releases/latest/download/luminesk-linux-amd64)
-For macOS: [luminesk-darwin-arm64](https://github.com/astra-v1/LumiNESK/releases/latest/download/luminesk-darwin-arm64)
+Prebuilt binaries are available in the [releases](https://github.com/task-v1/LumiNESK/releases) section.
+For Windows: [luminesk-windows-amd64.exe](https://github.com/task-v1/LumiNESK/releases/latest/download/luminesk-windows-amd64.exe)
+For Linux: [luminesk-linux-amd64](https://github.com/task-v1/LumiNESK/releases/latest/download/luminesk-linux-amd64)
+For macOS: [luminesk-darwin-arm64](https://github.com/task-v1/LumiNESK/releases/latest/download/luminesk-darwin-arm64)
 
 #### Example (Linux)
 
@@ -101,7 +101,7 @@ luminesk-darwin-arm64 --help
 # Installation from source
 
 ```bash
-git clone https://github.com/astra-v1/LumiNESK
+git clone https://github.com/task-v1/LumiNESK
 cd LumiNESK
 
 uv venv
@@ -208,7 +208,7 @@ Follow container logs manually:
 docker logs --follow luminesk-<server-tag>
 ```
 
---- 
+---
 
 # Core Registry
 
@@ -260,4 +260,4 @@ The project status of LumiNESK is currently **active development (Beta)**. The t
 
 The project is licensed under **GPL-3.0-or-later**.
 
-See [LICENSE](https://github.com/astra-v1/LumiNESK/blob/main/LICENSE)
+See [LICENSE](https://github.com/task-v1/LumiNESK/blob/main/LICENSE)
