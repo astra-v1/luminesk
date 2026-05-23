@@ -151,6 +151,7 @@ MESSAGE_CATALOGS: Final[dict[str, dict[str, str]]] = {
 		"cli.create.core_not_found": "Core {core_id} was not found in the registry. Check available cores with {command}.",
 		"cli.create.success_title": "Server created",
 		"cli.start.argument.tag": "Server tag. If omitted, LumiNESK resolves the current directory.",
+		"cli.attach.argument.tag": "Server tag. If omitted, LumiNESK resolves the current directory.",
 		"cli.start.option.loop": "Restart the server automatically when it stops.",
 		"cli.start.option.detached": "Start in Docker and leave it running in the background.",
 		"cli.start.detached_attach_title": "Attach Logs",

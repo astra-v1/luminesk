@@ -249,6 +249,23 @@ def start(
 	raise SystemExit(exit_code)
 
 
+@app.command
+def attach(
+	tag: Annotated[str | None, Parameter(help=t("cli.attach.argument.tag"))] = None,
+) -> None:
+	"""Attach to a running server and follow logs."""
+	config = _load_cli_config()
+
+	try:
+		server = srv.resolve_server(config=config, tag=tag, directory=Path.cwd())
+		exit_code = srv.attach_server(config=config, server=server)
+	except srv.ServerManagerError as exc:
+		console.print(error_panel(str(exc)))
+		raise SystemExit(1) from exc
+
+	raise SystemExit(exit_code)
+
+
 @app.command(name="upgrade-core", alias="upgrade_core")
 def upgrade_core(
 	*,

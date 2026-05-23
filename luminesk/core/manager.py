@@ -585,9 +585,10 @@ def run_server(
 
 	if detached:
 		if console is not None:
+			attach_command = accent(f"nesk attach {server.tag}", bold=True)
 			console.print(
 				info_panel(
-					accent(" ".join(launch_result.attach_command), bold=True),
+					attach_command,
 					title=t("cli.start.detached_attach_title"),
 				)
 			)
@@ -595,6 +596,22 @@ def run_server(
 
 	return launcher.follow_container_logs(
 		launch_result.container_name,
+		config=config,
+		server_tag=server.tag,
+	)
+
+
+def attach_server(
+	config: UserConfig,
+	server: ManagedServer,
+) -> int:
+	sync_runtime_states(config)
+	runtime_view = _build_runtime_view(config, server)
+	if runtime_view.status != "running" or runtime_view.docker_container_name is None:
+		raise ServerManagerError(t("manager.server_not_running", tag=server.tag))
+
+	return launcher.follow_container_logs(
+		runtime_view.docker_container_name,
 		config=config,
 		server_tag=server.tag,
 	)

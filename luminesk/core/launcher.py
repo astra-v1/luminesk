@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+import threading
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,6 +24,7 @@ from luminesk.utils.docker import (
 	get_docker_container_pid,
 	normalize_memory_limit,
 	remove_docker_container,
+	send_docker_command,
 )
 from luminesk.utils.rich_utils import accent, ansi_text
 
@@ -141,7 +144,11 @@ def follow_container_logs(
 	server_tag: str,
 ) -> int:
 	docker_bin = get_docker_binary()
-	process = subprocess.Popen([docker_bin, "logs", "--follow", container_name])
+	process = subprocess.Popen(
+		[docker_bin, "logs", "--follow", container_name],
+		stdin=subprocess.DEVNULL,
+	)
+	_start_console_forwarder(container_name)
 
 	try:
 		logs_exit_code = process.wait()
@@ -161,6 +168,26 @@ def follow_container_logs(
 	config.mark_server_stopped(server_tag, exit_code=exit_code)
 	config.save()
 	return exit_code if exit_code is not None else logs_exit_code
+
+
+def _start_console_forwarder(container_name: str) -> threading.Thread | None:
+	if not sys.stdin.isatty():
+		return None
+
+	def _forward() -> None:
+		for line in sys.stdin:
+			command = line.rstrip("\n")
+			try:
+				send_docker_command(container_name, command)
+			except RuntimeError:
+				if not docker_container_is_running(container_name):
+					break
+				continue
+
+	thread = threading.Thread(target=_forward, name=f"luminesk-console-{container_name}")
+	thread.daemon = True
+	thread.start()
+	return thread
 
 
 def ensure_docker_image(
