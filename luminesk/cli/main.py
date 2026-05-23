@@ -225,7 +225,7 @@ def start(
 	detached: Annotated[
 		bool,
 		Parameter(
-			name=["--detached", "--deatached", "-d"],
+			name=["--detached", "-d"],
 			help=t("cli.start.option.detached"),
 		),
 	] = False,
