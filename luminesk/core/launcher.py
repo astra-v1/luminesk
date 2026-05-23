@@ -9,6 +9,8 @@ from typing import Protocol
 
 from luminesk.core.config import UserConfig
 from luminesk.core.messages import t
+from rich.console import Console
+
 from luminesk.utils.docker import (
 	DEFAULT_DOCKER_IMAGE,
 	build_docker_container_name,
@@ -21,6 +23,7 @@ from luminesk.utils.docker import (
 	normalize_memory_limit,
 	remove_docker_container,
 )
+from luminesk.utils.rich_utils import accent, ansi_text
 
 
 class ServerLaunchTarget(Protocol):
@@ -54,10 +57,11 @@ def launch_server_detached(
 	memory_limit: str | None = None,
 	image: str | None = None,
 	config: UserConfig | None = None,
+	console: Console | None = None,
 ) -> DetachedLaunchResult:
 	docker_bin = get_docker_binary()
 	resolved_image = image or getattr(server, "java_image", DEFAULT_DOCKER_IMAGE)
-	ensure_docker_image(resolved_image, docker_bin=docker_bin)
+	ensure_docker_image(resolved_image, docker_bin=docker_bin, console=console)
 	normalized_memory_limit = normalize_memory_limit(memory_limit or server.memory_limit)
 	log_path = build_log_path(server)
 	log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,7 +163,12 @@ def follow_container_logs(
 	return exit_code if exit_code is not None else logs_exit_code
 
 
-def ensure_docker_image(image: str, *, docker_bin: str | None = None) -> None:
+def ensure_docker_image(
+	image: str,
+	*,
+	docker_bin: str | None = None,
+	console: Console | None = None,
+) -> None:
 	resolved_docker_bin = docker_bin or get_docker_binary()
 	inspect_result = subprocess.run(
 		[resolved_docker_bin, "image", "inspect", image],
@@ -173,15 +182,36 @@ def ensure_docker_image(image: str, *, docker_bin: str | None = None) -> None:
 	if inspect_result.returncode == 0:
 		return
 
-	pull_result = subprocess.run(
-		[resolved_docker_bin, "pull", image],
-		check=False,
-		stdout=subprocess.PIPE,
-		stderr=subprocess.PIPE,
-		text=True,
-		encoding="utf-8",
-		errors="replace",
-	)
+	status_message = None
+	if console is not None:
+		status_message = ansi_text(
+			t(
+				"launcher.docker_pull_start",
+				image=accent(image, bold=True),
+			)
+		)
+
+	if status_message is None:
+		pull_result = subprocess.run(
+			[resolved_docker_bin, "pull", image],
+			check=False,
+			stdout=subprocess.PIPE,
+			stderr=subprocess.PIPE,
+			text=True,
+			encoding="utf-8",
+			errors="replace",
+		)
+	else:
+		with console.status(status_message, spinner="dots"):
+			pull_result = subprocess.run(
+				[resolved_docker_bin, "pull", image],
+				check=False,
+				stdout=subprocess.PIPE,
+				stderr=subprocess.PIPE,
+				text=True,
+				encoding="utf-8",
+				errors="replace",
+			)
 	if pull_result.returncode != 0:
 		error = pull_result.stderr.strip() or pull_result.stdout.strip()
 		raise RuntimeError(t("launcher.docker_pull_failed", image=image, error=error))

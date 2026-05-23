@@ -90,6 +90,7 @@ MESSAGE_CATALOGS: Final[dict[str, dict[str, str]]] = {
 		"docker.invalid_memory_limit": "Invalid Docker memory limit '{memory_limit}'. Use values like 512m, 1g, or bytes.",
 		"docker.invalid_java_image": "Invalid Java runtime '{java}'. Use a version like 21 or a Docker image like eclipse-temurin:21-jre.",
 		"launcher.docker_container_exists": "Docker container '{container_name}' is already running.",
+		"launcher.docker_pull_start": "Downloading Docker image {image}. This may take a few minutes on first run.",
 		"launcher.docker_run_failed": "Docker failed to start the container (exit {exit_code}): {error}",
 		"launcher.docker_pull_failed": "Docker failed to pull Java runtime image '{image}': {error}",
 		"diagnostic.source_ok": "200 OK",

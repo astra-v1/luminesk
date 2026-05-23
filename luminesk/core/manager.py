@@ -563,6 +563,7 @@ def run_server(
 			server,
 			loop=loop,
 			config=config,
+			console=console,
 		)
 	except RuntimeError as exc:
 		raise ServerManagerError(str(exc)) from exc
