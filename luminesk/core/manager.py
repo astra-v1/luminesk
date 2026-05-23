@@ -17,7 +17,6 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 
-from rich.panel import Panel
 from rich.console import Console
 from rich.progress import (
 	BarColumn,
@@ -37,6 +36,16 @@ from luminesk.utils.downloads import get_latest_download_info
 from luminesk.utils.download_models import CoreDownloadInfo
 from luminesk.utils.errors import format_error
 from luminesk.utils.http import request_with_retries, stream_with_retries
+from luminesk.utils.rich_utils import (
+	accent,
+	ansi_text,
+	format_kv,
+	format_server,
+	info_panel,
+	muted,
+	success,
+	success_panel,
+)
 from luminesk.utils.docker import (
 	docker_container_is_running,
 	get_docker_container_exit_code,
@@ -559,32 +568,26 @@ def run_server(
 		raise ServerManagerError(str(exc)) from exc
 
 	if console is not None:
-		console.print(
-			Panel(
-				"\n".join(
-					[
-						t("manager.docker_started"),
-						f"{t('label.server')}: [cyan]{server.name}[/cyan] ([cyan]{server.tag}[/cyan])",
-						f"{t('label.container')}: [cyan]{launch_result.container_name}[/cyan]",
-						f"{t('label.java')}: [cyan]{launch_result.java_image}[/cyan]",
-						f"{t('label.memory_limit')}: [cyan]{launch_result.memory_limit}[/cyan]",
-						f"{t('label.log')}: [dim]{launch_result.log_path}[/dim]",
-					]
-				),
-				title=t("panel.success_title"),
-				border_style="green",
-				expand=False,
-			)
-		)
+		launch_details = [
+			success(t("manager.docker_started"), bold=True),
+			format_kv(
+				t("label.server"),
+				format_server(server.name, server.tag),
+				value_color=None,
+			),
+			format_kv(t("label.container"), launch_result.container_name),
+			format_kv(t("label.java"), launch_result.java_image),
+			format_kv(t("label.memory_limit"), launch_result.memory_limit),
+			format_kv(t("label.log"), launch_result.log_path, dim_value=True),
+		]
+		console.print(success_panel("\n".join(launch_details)))
 
 	if detached:
 		if console is not None:
 			console.print(
-				Panel(
-					" ".join(launch_result.attach_command),
+				info_panel(
+					accent(" ".join(launch_result.attach_command), bold=True),
 					title=t("cli.start.detached_attach_title"),
-					border_style="cyan",
-					expand=False,
 				)
 			)
 		return 0
@@ -831,13 +834,12 @@ def _restore_cached_core(
 		return None
 
 	if console is not None:
-		console.print(
-			t(
-				"manager.using_cached_core",
-				core_name=core.name,
-				version=download_info.version,
-			)
+		message = t(
+			"manager.using_cached_core",
+			core_name=accent(core.name, bold=True),
+			version=muted(download_info.version),
 		)
+		console.print(ansi_text(message))
 
 	return DownloadedCore(jar_path=target_path, version=download_info.version)
 

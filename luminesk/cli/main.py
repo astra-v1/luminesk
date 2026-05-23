@@ -6,10 +6,10 @@ from typing import Annotated
 
 from cyclopts import App, Parameter
 from rich.console import Console
-from rich.live import Live
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
+from rich.text import Text
 
 from luminesk.core import diagnostic as dg
 from luminesk.core import manager as srv
@@ -24,10 +24,18 @@ from luminesk.utils.docker import (
 	normalize_memory_limit,
 )
 from luminesk.utils.rich_utils import (
-	AnimatedGradientText,
+	accent,
+	ansi_text,
+	danger,
+	emph,
 	error_panel,
+	format_kv,
+	format_server,
 	info_panel,
+	muted,
+	success,
 	success_panel,
+	warning,
 )
 
 
@@ -60,47 +68,39 @@ def _load_cli_config() -> UserConfig:
 	return config
 
 
-def _status_label(status: bool) -> str:
-	return f"[green]{t('common.ok')}[/]" if status else f"[red]{t('common.fail')}[/]"
+def _status_label(status: bool):
+	label = t("common.ok") if status else t("common.fail")
+	styled = success(label, bold=True) if status else danger(label, bold=True)
+	return ansi_text(styled)
 
 
 @app.command(name="diagnostic", alias="check")
 def diagnostic() -> None:
 	"""Check Nukkit-compatible core repositories."""
 	_load_cli_config()
-	label = AnimatedGradientText(
-		t("cli.diagnostic.checking_sources"),
-		palette=(
-			(80, 80, 80),
-			(120, 120, 120),
-			(180, 180, 180),
-			(120, 120, 120),
-			(80, 80, 80),
-		),
-	)
-
 	results = []
-
-	with Live(label, refresh_per_second=15, transient=True) as live:
-		label.set_text(t("cli.diagnostic.checking_sources"))
-		live.update(label)
+	status_text = ansi_text(muted(t("cli.diagnostic.checking_sources")))
+	with console.status(status_text, spinner="dots"):
 		results.extend(dg.check_repositories())
 
-	table = Table()
-	table.add_column(t("label.component"), style="cyan", no_wrap=True)
+	table = Table(header_style="bold")
+	table.add_column(t("label.component"), no_wrap=True)
 	table.add_column(t("label.status"), no_wrap=True)
 	table.add_column(t("label.description"))
 
 	for res in results:
-		table.add_row(res.name, _status_label(res.status), res.message)
+		name_text = ansi_text(accent(res.name, bold=True))
+		status_text = _status_label(res.status)
+		message_text = ansi_text(success(res.message) if res.status else danger(res.message))
+		table.add_row(name_text, status_text, message_text)
 
 	console.print(table)
 
 	if any(not res.status for res in results):
-		console.print(error_panel(t("cli.diagnostic.failure")))
+		console.print(error_panel(danger(t("cli.diagnostic.failure"), bold=True)))
 		raise SystemExit(1)
 
-	console.print(success_panel(t("cli.diagnostic.success")))
+	console.print(success_panel(success(t("cli.diagnostic.success"), bold=True)))
 
 
 @app.command
@@ -110,13 +110,17 @@ def cores() -> None:
 	lines = []
 
 	for core in registry.get_all():
-		lines.append(f"[green]* {core.name}[/green]\n[dim]{core.description}[/dim]")
+		bullet = success("*")
+		name = accent(core.name, bold=True)
+		description = muted(core.description)
+		lines.append(f"{bullet} {name}\n{description}")
 
-	lines.append(t("cli.cores.tip"))
+	tip = f"\n{emph('Tip:')} {t('cli.cores.tip', command=accent('nesk diagnostic', bold=True))}"
+	lines.append(tip)
 
 	console.print(
 		Panel(
-			"\n\n".join(lines),
+			ansi_text("\n\n".join(lines)),
 			title=t("cli.cores.title"),
 			border_style="cyan",
 			padding=(1, 2),
@@ -144,7 +148,15 @@ def create(
 
 	selected_core = registry.get_by_id(core)
 	if selected_core is None:
-		console.print(error_panel(t("cli.create.core_not_found", core_id=core)))
+		console.print(
+			error_panel(
+				t(
+					"cli.create.core_not_found",
+					core_id=danger(core, bold=True),
+					command=accent("nesk cores", bold=True),
+				)
+			)
+		)
 		raise SystemExit(1)
 
 	if name is None:
@@ -190,23 +202,18 @@ def create(
 		console.print(error_panel(str(exc)))
 		raise SystemExit(1) from exc
 
-	console.print(
-		success_panel(
-			"\n".join(
-				[
-					t("cli.create.success_title"),
-					f"{t('label.name')}: [cyan]{server.name}[/cyan]",
-					f"{t('label.tag')}: [cyan]{server.tag}[/cyan]",
-					f"{t('label.core')}: [cyan]{selected_core.name}[/cyan]",
-					f"{t('label.core_version')}: [cyan]{server.core_version or t('common.unknown')}[/cyan]",
-					f"{t('label.jar')}: [cyan]{server.jar_name}[/cyan]",
-					f"{t('label.java')}: [cyan]{server.java_image}[/cyan]",
-					f"{t('label.memory_limit')}: [cyan]{server.memory_limit}[/cyan]",
-					f"{t('label.path')}: [dim]{server.path}[/dim]",
-				]
-			)
-		)
-	)
+	create_details = [
+		success(t("cli.create.success_title"), bold=True),
+		format_kv(t("label.name"), server.name),
+		format_kv(t("label.tag"), server.tag),
+		format_kv(t("label.core"), selected_core.name),
+		format_kv(t("label.core_version"), server.core_version or t("common.unknown")),
+		format_kv(t("label.jar"), server.jar_name),
+		format_kv(t("label.java"), server.java_image),
+		format_kv(t("label.memory_limit"), server.memory_limit),
+		format_kv(t("label.path"), server.path, dim_value=True),
+	]
+	console.print(success_panel("\n".join(create_details)))
 
 
 @app.command
@@ -257,19 +264,18 @@ def upgrade_core(
 		console.print(error_panel(str(exc)))
 		raise SystemExit(1) from exc
 
-	console.print(
-		success_panel(
-			"\n".join(
-				[
-					t("cli.upgrade.success_title"),
-					f"{t('label.server')}: [cyan]{updated_server.name}[/cyan] ([cyan]{updated_server.tag}[/cyan])",
-					f"{t('label.core')}: [cyan]{updated_server.core_id}[/cyan]",
-					f"{t('label.version')}: [cyan]{updated_server.core_version or t('common.unknown')}[/cyan]",
-					f"{t('label.jar')}: [cyan]{updated_server.jar_name}[/cyan]",
-				]
-			)
-		)
-	)
+	upgrade_details = [
+		success(t("cli.upgrade.success_title"), bold=True),
+		format_kv(
+			t("label.server"),
+			format_server(updated_server.name, updated_server.tag),
+			value_color=None,
+		),
+		format_kv(t("label.core"), updated_server.core_id),
+		format_kv(t("label.version"), updated_server.core_version or t("common.unknown")),
+		format_kv(t("label.jar"), updated_server.jar_name),
+	]
+	console.print(success_panel("\n".join(upgrade_details)))
 
 
 @app.command(name="change-core", alias="change_core")
@@ -286,7 +292,15 @@ def change_core(
 
 	selected_core = registry.get_by_id(core)
 	if selected_core is None:
-		console.print(error_panel(t("cli.create.core_not_found", core_id=core)))
+		console.print(
+			error_panel(
+				t(
+					"cli.create.core_not_found",
+					core_id=danger(core, bold=True),
+					command=accent("nesk cores", bold=True),
+				)
+			)
+		)
 		raise SystemExit(1)
 
 	try:
@@ -301,20 +315,19 @@ def change_core(
 		console.print(error_panel(str(exc)))
 		raise SystemExit(1) from exc
 
-	console.print(
-		success_panel(
-			"\n".join(
-				[
-					t("cli.change.success_title"),
-					f"{t('label.server')}: [cyan]{updated_server.name}[/cyan] ([cyan]{updated_server.tag}[/cyan])",
-					f"{t('label.core')}: [cyan]{updated_server.core_id}[/cyan]",
-					f"{t('label.version')}: [cyan]{updated_server.core_version or t('common.unknown')}[/cyan]",
-					f"{t('label.path')}: [cyan]{updated_server.path}[/cyan]",
-					f"{t('label.jar')}: [cyan]{updated_server.jar_name}[/cyan]",
-				]
-			)
-		)
-	)
+	change_details = [
+		success(t("cli.change.success_title"), bold=True),
+		format_kv(
+			t("label.server"),
+			format_server(updated_server.name, updated_server.tag),
+			value_color=None,
+		),
+		format_kv(t("label.core"), updated_server.core_id),
+		format_kv(t("label.version"), updated_server.core_version or t("common.unknown")),
+		format_kv(t("label.path"), updated_server.path, dim_value=True),
+		format_kv(t("label.jar"), updated_server.jar_name),
+	]
+	console.print(success_panel("\n".join(change_details)))
 
 
 @app.command(name="change-java", alias="change_java")
@@ -340,17 +353,16 @@ def change_java(
 		console.print(error_panel(str(exc)))
 		raise SystemExit(1) from exc
 
-	console.print(
-		success_panel(
-			"\n".join(
-				[
-					t("cli.change_java.success_title"),
-					f"{t('label.server')}: [cyan]{updated_server.name}[/cyan] ([cyan]{updated_server.tag}[/cyan])",
-					f"{t('label.java')}: [cyan]{updated_server.java_image}[/cyan]",
-				]
-			)
-		)
-	)
+	java_details = [
+		success(t("cli.change_java.success_title"), bold=True),
+		format_kv(
+			t("label.server"),
+			format_server(updated_server.name, updated_server.tag),
+			value_color=None,
+		),
+		format_kv(t("label.java"), updated_server.java_image),
+	]
+	console.print(success_panel("\n".join(java_details)))
 
 
 @app.command
@@ -389,17 +401,12 @@ def delete(
 		console.print(error_panel(str(exc)))
 		raise SystemExit(1) from exc
 
-	console.print(
-		success_panel(
-			"\n".join(
-				[
-					t("cli.delete.success_title"),
-					f"{t('label.server')}: [cyan]{server.name}[/cyan] ([cyan]{server.tag}[/cyan])",
-					f"{t('label.path')}: [dim]{server.path}[/dim]",
-				]
-			)
-		)
-	)
+	delete_details = [
+		success(t("cli.delete.success_title"), bold=True),
+		format_kv(t("label.server"), format_server(server.name, server.tag), value_color=None),
+		format_kv(t("label.path"), server.path, dim_value=True),
+	]
+	console.print(success_panel("\n".join(delete_details)))
 
 
 @app.command(name="list")
@@ -435,9 +442,9 @@ def list_servers(
 		console.print(info_panel(t("cli.list.no_matches")))
 		return
 
-	table = Table(title=t("cli.list.title"))
-	table.add_column(t("label.tag"), style="cyan", no_wrap=True)
-	table.add_column(t("label.name"), style="bold")
+	table = Table(title=t("cli.list.title"), header_style="bold")
+	table.add_column(t("label.tag"), no_wrap=True)
+	table.add_column(t("label.name"))
 	table.add_column(t("label.core"), no_wrap=True)
 	table.add_column(t("label.java"), no_wrap=True)
 	table.add_column(t("label.status"), no_wrap=True)
@@ -448,17 +455,33 @@ def list_servers(
 	table.add_column(t("label.path"), overflow="fold")
 
 	for view in filtered_views:
+		pid_value = str(view.pid) if view.pid is not None else t("common.empty")
+		pid_text = muted(pid_value) if view.pid is None else pid_value
+
+		uptime_value = srv.format_timedelta(view.uptime)
+		uptime_text = muted(uptime_value) if view.uptime is None else uptime_value
+
+		last_started = _format_datetime(view.last_started_at)
+		last_started_text = (
+			muted(last_started) if view.last_started_at is None else last_started
+		)
+
+		last_stopped = _format_datetime(view.last_stopped_at)
+		last_stopped_text = (
+			muted(last_stopped) if view.last_stopped_at is None else last_stopped
+		)
+
 		table.add_row(
-			view.server.tag,
-			view.server.name,
-			view.server.core_id,
-			view.server.java_image,
+			ansi_text(accent(view.server.tag, bold=True)),
+			ansi_text(emph(view.server.name)),
+			ansi_text(accent(view.server.core_id)),
+			ansi_text(accent(view.server.java_image)),
 			_format_status(view.status, view.loop_enabled, view.docker_container_name),
-			str(view.pid or t("common.empty")),
-			srv.format_timedelta(view.uptime),
-			_format_datetime(view.last_started_at),
-			_format_datetime(view.last_stopped_at),
-			str(view.server.path),
+			ansi_text(pid_text),
+			ansi_text(uptime_text),
+			ansi_text(last_started_text),
+			ansi_text(last_stopped_text),
+			ansi_text(muted(str(view.server.path))),
 		)
 
 	console.print(table)
@@ -481,16 +504,28 @@ def _control_server(
 		raise SystemExit(1) from exc
 
 	if result.loop_active and not force:
-		console.print(info_panel(t("cli.control.loop_warning", tag=result.target.server.tag)))
+		console.print(
+			info_panel(
+				t(
+					"cli.control.loop_warning",
+					tag=accent(result.target.server.tag, bold=True),
+					force_flag=warning("--force", bold=True),
+				)
+			)
+		)
 
 	details = [
-		f"{t('label.action')}: [cyan]{action_name}[/cyan]",
-		f"{t('label.server')}: [cyan]{result.target.server.name}[/cyan] ([cyan]{result.target.server.tag}[/cyan])",
-		f"{t('label.signal')}: [cyan]{result.signal_name}[/cyan]",
+		format_kv(t("label.action"), action_name, bold_value=True),
+		format_kv(
+			t("label.server"),
+			format_server(result.target.server.name, result.target.server.tag),
+			value_color=None,
+		),
+		format_kv(t("label.signal"), result.signal_name),
 	]
 
 	if result.signaled_server and result.server_pid is not None:
-		details.append(f"{t('label.server_pid')}: [cyan]{result.server_pid}[/cyan]")
+		details.append(format_kv(t("label.server_pid"), result.server_pid))
 
 	console.print(success_panel("\n".join(details)))
 
@@ -509,16 +544,20 @@ def _format_status(
 	status: str,
 	loop_enabled: bool,
 	docker_container_name: str | None = None,
-) -> str:
+) -> Text:
 	suffixes = []
 	if loop_enabled:
-		suffixes.append(f"[yellow]{t('common.loop')}[/yellow]")
+		suffixes.append(warning(t("common.loop")))
 	if docker_container_name is not None:
-		suffixes.append(f"[cyan]{t('common.docker_container', container_name=docker_container_name)}[/cyan]")
-	suffix = f" [dim]({', '.join(suffixes)})[/dim]" if suffixes else ""
+		suffixes.append(
+			accent(
+				t("common.docker_container", container_name=docker_container_name)
+			)
+		)
+	suffix = f" ({', '.join(suffixes)})" if suffixes else ""
 	if status == "running":
-		return f"[green]{t('common.running')}[/green]{suffix}"
-	return f"[red]{t('common.stopped')}[/red]{suffix}"
+		return ansi_text(success(t("common.running"), bold=True) + suffix)
+	return ansi_text(danger(t("common.stopped"), bold=True) + suffix)
 
 
 def _format_datetime(value: datetime | None) -> str:

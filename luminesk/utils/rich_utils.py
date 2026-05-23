@@ -1,85 +1,125 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Sequence
-
+from chromakitx import AnsiColor, Color, ColorFormattable, TextStyle
 from rich.panel import Panel
 from rich.text import Text
 
 from luminesk.core.messages import t
 
-if TYPE_CHECKING:
-	from rich_gradient import ColorType
-
-RGBColor = tuple[int, int, int]
-
-
-def _load_gradient():
-	try:
-		from rich_gradient import Gradient
-	except ImportError as exc:
-		raise RuntimeError(t("rich.gradient.missing")) from exc
-
-	return Gradient
+ACCENT_COLOR = AnsiColor.Cyan
+SUCCESS_COLOR = AnsiColor.Green
+WARNING_COLOR = AnsiColor.Yellow
+ERROR_COLOR = AnsiColor.Red
+RESET_STYLE = TextStyle.RESET.format()
 
 
-def _to_hex_palette(colors: Sequence[RGBColor]) -> list[ColorType]:
-	if not colors:
-		raise ValueError(t("rich.gradient.empty"))
+def style_text(
+	text: str,
+	*,
+	color: ColorFormattable | None = None,
+	background: ColorFormattable | None = None,
+	bold: bool = False,
+	dim: bool = False,
+	underline: bool = False,
+) -> str:
+	if not text:
+		return text
 
-	return [f"#{red:02x}{green:02x}{blue:02x}" for red, green, blue in colors]
+	parts: list[str] = []
+	if bold:
+		parts.append(TextStyle.BOLD.format())
+	if dim:
+		parts.append(TextStyle.DIM.format())
+	if underline:
+		parts.append(TextStyle.UNDERLINE.format())
+	if color is not None:
+		parts.append(str(Color(color)))
+	if background is not None:
+		parts.append(str(Color(background, is_background=True)))
+
+	if not parts:
+		return text
+
+	return "".join(parts) + text + RESET_STYLE
 
 
-@dataclass
-class AnimatedGradientText:
-	text: str
-	palette: Sequence[RGBColor] = (
-		(255, 187, 0),
-		(255, 140, 0),
-		(255, 255, 255),
-		(255, 140, 0),
-		(255, 187, 0),
-	)
-	speed: float = 0.03
-	bold: bool = True
-	frame: int = field(default=0, init=False)
+def ansi_text(text: str) -> Text:
+	return Text.from_ansi(text)
 
-	def set_text(self, text: str) -> None:
-		self.text = text
 
-	def __rich__(self):
-		Gradient = _load_gradient()
-		content = Text(self.text, style="bold" if self.bold else "")
-		rendered = Gradient(content, colors=_to_hex_palette(self.palette))
+def accent(text: str, *, bold: bool = False) -> str:
+	return style_text(text, color=ACCENT_COLOR, bold=bold)
 
-		if hasattr(rendered, "phase"):
-			rendered.phase = self.frame * self.speed
 
-		self.frame += 1
-		return rendered
+def success(text: str, *, bold: bool = False) -> str:
+	return style_text(text, color=SUCCESS_COLOR, bold=bold)
+
+
+def warning(text: str, *, bold: bool = False) -> str:
+	return style_text(text, color=WARNING_COLOR, bold=bold)
+
+
+def danger(text: str, *, bold: bool = False) -> str:
+	return style_text(text, color=ERROR_COLOR, bold=bold)
+
+
+def muted(text: str) -> str:
+	return style_text(text, dim=True)
+
+
+def emph(text: str) -> str:
+	return style_text(text, bold=True)
+
+
+def format_kv(
+	label: str,
+	value: object,
+	*,
+	value_color: ColorFormattable | None = ACCENT_COLOR,
+	dim_value: bool = False,
+	bold_value: bool = False,
+	label_dim: bool = True,
+) -> str:
+	label_text = style_text(label, dim=label_dim) if label_dim else label
+	value_text = str(value)
+	if value_color is not None or dim_value or bold_value:
+		value_text = style_text(
+			value_text,
+			color=value_color,
+			dim=dim_value,
+			bold=bold_value,
+		)
+	return f"{label_text}: {value_text}"
+
+
+def format_server(name: str, tag: str) -> str:
+	return f"{accent(name, bold=True)} ({accent(tag)})"
 
 def info_panel(message: str, title: str | None = None) -> Panel:
+	panel_title = accent(title or t("panel.info_title"), bold=True)
 	return Panel(
-		message,
-		title=title or t("panel.info_title"),
+		ansi_text(message),
+		title=ansi_text(panel_title),
 		border_style="cyan",
-		expand=False
+		expand=False,
 	)
 
 
 def error_panel(message: str, title: str | None = None) -> Panel:
+	panel_title = danger(title or t("panel.error_title"), bold=True)
 	return Panel(
-		message,
-		title=title or t("panel.error_title"),
+		ansi_text(message),
+		title=ansi_text(panel_title),
 		border_style="red",
-		expand=False
+		expand=False,
 	)
 
 
 def success_panel(message: str, title: str | None = None) -> Panel:
+	panel_title = success(title or t("panel.success_title"), bold=True)
 	return Panel(
-		message,
-		title=title or t("panel.success_title"),
+		ansi_text(message),
+		title=ansi_text(panel_title),
 		border_style="green",
-		expand=False
+		expand=False,
 	)
